@@ -1,9 +1,10 @@
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import CoreGraphics
 
 final class HotkeyManager {
-    enum Mode { case allWindows, currentApp, spaces }
+    enum Mode: Equatable { case allWindows, currentApp, spaces }
     enum Direction { case left, right, up, down }
 
     /// How a binding arms the picker: base mode plus per-binding overrides (#131, #130).
@@ -48,6 +49,7 @@ final class HotkeyManager {
     private var armed: Mode?
     private var armedBinding: HotkeyBinding?
     private var armedSticky = false
+    private var armedCurrentSpaceOnly = false
     private var armedAt: Date?
     private var lastShift = false
     private var shiftTapPending = false
@@ -60,6 +62,7 @@ final class HotkeyManager {
 
     private var wakeToken: NSObjectProtocol?
     private var screensWakeToken: NSObjectProtocol?
+    private var inputSourceToken: NSObjectProtocol?
     private var healthTimer: Timer?
 
     private static let kcEscape: CGKeyCode = 53
@@ -73,16 +76,20 @@ final class HotkeyManager {
 
     func start() {
         if !ensureAccessibility() { return }
+        KeyboardLayoutTranslator.shared.refresh()
         startTapThread()
         installWakeObserver()
+        installInputSourceObserver()
         startHealthCheck()
     }
 
     func stop() {
         if let wakeToken { NSWorkspace.shared.notificationCenter.removeObserver(wakeToken) }
         if let screensWakeToken { NSWorkspace.shared.notificationCenter.removeObserver(screensWakeToken) }
+        if let inputSourceToken { DistributedNotificationCenter.default().removeObserver(inputSourceToken) }
         wakeToken = nil
         screensWakeToken = nil
+        inputSourceToken = nil
         healthTimer?.invalidate()
         healthTimer = nil
         stateLock.lock()
@@ -162,6 +169,19 @@ final class HotkeyManager {
             object: nil, queue: .main
         ) { [weak self] _ in
             self?.reinstallIfNeeded()
+        }
+    }
+
+    private func installInputSourceObserver() {
+        let name = Notification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String)
+        inputSourceToken = DistributedNotificationCenter.default().addObserver(
+            forName: name,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                KeyboardLayoutTranslator.shared.refresh()
+            }
         }
     }
 
@@ -303,7 +323,10 @@ final class HotkeyManager {
                     return nil
                 }
 
-                let character = PickerKeyInterpreter.logicalCharacter(from: event)
+                let character = PickerKeyInterpreter.logicalCharacter(
+                    from: event,
+                    translator: KeyboardLayoutTranslator.shared
+                )
                 let characterAction = PickerKeyInterpreter.action(
                     logicalCharacter: character,
                     keyCode: kc,
@@ -364,17 +387,34 @@ final class HotkeyManager {
         var effective = style
         effective.sticky = style.sticky || UserDefaults.standard.bool(forKey: SwitchPreferences.stickyModeKey)
         effective.reverse = shift
+        let nextIdentity = PickerArmTransitionPolicy.Identity(
+            mode: effective.mode,
+            sticky: effective.sticky,
+            currentSpaceOnly: effective.currentSpaceOnly
+        )
         stateLock.lock()
-        let isFirst = armed == nil
-        if isFirst {
-            armed = style.mode
+        let currentIdentity = armed.map {
+            PickerArmTransitionPolicy.Identity(
+                mode: $0,
+                sticky: armedSticky,
+                currentSpaceOnly: armedCurrentSpaceOnly
+            )
+        }
+        let transition = PickerArmTransitionPolicy.action(current: currentIdentity, next: nextIdentity)
+        if transition == .arm {
+            armed = effective.mode
             armedBinding = binding
             armedSticky = effective.sticky
+            armedCurrentSpaceOnly = effective.currentSpaceOnly
             armedAt = Date()
+        } else {
+            // Alternate bindings for the same semantic picker still advance,
+            // but release detection must follow the binding most recently used.
+            armedBinding = binding
         }
         stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
-            if isFirst { self?.onArm?(effective) } else { self?.onAdvance?(shift) }
+            if transition == .arm { self?.onArm?(effective) } else { self?.onAdvance?(shift) }
         }
     }
 
@@ -388,6 +428,7 @@ final class HotkeyManager {
         armed = nil
         armedBinding = nil
         armedSticky = false
+        armedCurrentSpaceOnly = false
         armedAt = nil
         shiftTapPending = false
     }

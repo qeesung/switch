@@ -52,21 +52,14 @@ enum PickerKeyInterpreter {
         return nil
     }
 
-    /// Decode on the event-tap thread without touching NSEvent/TSM. Command, Option,
-    /// and Control are removed so shortcuts still yield their layout's printable key;
-    /// Shift remains because it is required for uppercase letters and digits on layouts
-    /// such as French AZERTY.
-    static func logicalCharacter(from event: CGEvent) -> Character? {
-        guard let copy = event.copy() else { return nil }
-        copy.flags = copy.flags.intersection(.maskShift)
-        var length = 0
-        var buffer = [UniChar](repeating: 0, count: 4)
-        copy.keyboardGetUnicodeString(
-            maxStringLength: buffer.count,
-            actualStringLength: &length,
-            unicodeString: &buffer
-        )
-        guard length > 0 else { return nil }
-        return String(utf16CodeUnits: buffer, count: length).first
+    /// Decode from keyCode + the cached active layout. Never read CGEvent's
+    /// associated Unicode string: Option/Control may already have changed it,
+    /// and mutating event.flags does not translate that string again.
+    static func logicalCharacter(
+        from event: CGEvent,
+        translator: KeyboardLayoutTranslator
+    ) -> Character? {
+        let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        return translator.character(for: keyCode, shift: event.flags.contains(.maskShift))
     }
 }

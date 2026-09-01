@@ -20,7 +20,7 @@ final class PickerKeyInterpreterTests: XCTestCase {
         XCTAssertEqual(action("q", keyCode: 0, actionModifierMatches: true), .closeSelectedApp)
 
         XCTAssertNil(action(";", keyCode: 43, settingsModifierMatches: true))
-        XCTAssertEqual(action(",", keyCode: 16, settingsModifierMatches: true), .openSettings)
+        XCTAssertEqual(action(",", keyCode: 46, settingsModifierMatches: true), .openSettings)
 
         XCTAssertNil(action("&", keyCode: 18))
         XCTAssertEqual(action("1", keyCode: 18), .pickIndex(0))
