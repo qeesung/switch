@@ -105,6 +105,117 @@ final class WindowPolicyTests: XCTestCase {
             from: screens,
             mouseLocation: .zero
         )?.displayID, 1)
+
+        let noActiveMatch = screens.map {
+            PickerScreenSelectionPolicy.ScreenCandidate(
+                displayID: $0.displayID,
+                frame: $0.frame,
+                isActive: false,
+                isPrimary: $0.isPrimary,
+                displayUUID: $0.displayUUID
+            )
+        }
+        XCTAssertEqual(PickerScreenSelectionPolicy.select(
+            .active,
+            from: noActiveMatch,
+            mouseLocation: .zero
+        )?.displayID, 1)
+    }
+
+    func testFocusedWindowResolvesActiveDisplayUsingQuartzBounds() {
+        let displays = [
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 1,
+                bounds: CGRect(x: 0, y: 0, width: 1728, height: 1117)
+            ),
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 2,
+                bounds: CGRect(x: -465, y: -1080, width: 1920, height: 1080)
+            ),
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 3,
+                bounds: CGRect(x: 1455, y: -1080, width: 1920, height: 1080)
+            ),
+        ]
+
+        let focusedDisplayID = PickerScreenSelectionPolicy.activeDisplayID(
+            focusedWindowBounds: CGRect(x: -400, y: -950, width: 1000, height: 800),
+            fallbackWindowBounds: [],
+            from: displays
+        )
+        let screens = displays.map {
+            PickerScreenSelectionPolicy.ScreenCandidate(
+                displayID: $0.displayID,
+                frame: $0.bounds,
+                isActive: $0.displayID == focusedDisplayID,
+                isPrimary: $0.displayID == 1,
+                displayUUID: nil
+            )
+        }
+
+        XCTAssertEqual(PickerScreenSelectionPolicy.select(
+            .active,
+            from: screens,
+            mouseLocation: CGPoint(x: 2000, y: -500)
+        )?.displayID, 2)
+    }
+
+    func testFocusedWindowChoosesLargestOverlapAndRejectsInvalidFrames() {
+        let displays = [
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 1,
+                bounds: CGRect(x: 0, y: 0, width: 100, height: 100)
+            ),
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 2,
+                bounds: CGRect(x: 100, y: 0, width: 100, height: 100)
+            ),
+        ]
+
+        XCTAssertEqual(PickerScreenSelectionPolicy.displayContainingMost(
+            of: CGRect(x: 80, y: 10, width: 100, height: 60),
+            from: displays
+        ), 2)
+        XCTAssertNil(PickerScreenSelectionPolicy.displayContainingMost(
+            of: CGRect(x: 250, y: 10, width: 30, height: 30),
+            from: displays
+        ))
+        XCTAssertNil(PickerScreenSelectionPolicy.displayContainingMost(
+            of: .zero,
+            from: displays
+        ))
+    }
+
+    func testActiveDisplayPrefersFocusedWindowThenFrontmostCGFallback() {
+        let displays = [
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 1,
+                bounds: CGRect(x: 0, y: 0, width: 100, height: 100)
+            ),
+            PickerScreenSelectionPolicy.DisplayBoundsCandidate(
+                displayID: 2,
+                bounds: CGRect(x: 100, y: 0, width: 100, height: 100)
+            ),
+        ]
+
+        XCTAssertEqual(PickerScreenSelectionPolicy.activeDisplayID(
+            focusedWindowBounds: CGRect(x: 120, y: 10, width: 50, height: 50),
+            fallbackWindowBounds: [CGRect(x: 10, y: 10, width: 50, height: 50)],
+            from: displays
+        ), 2)
+        XCTAssertEqual(PickerScreenSelectionPolicy.activeDisplayID(
+            focusedWindowBounds: nil,
+            fallbackWindowBounds: [
+                CGRect(x: 250, y: 0, width: 20, height: 20),
+                CGRect(x: 10, y: 10, width: 50, height: 50),
+            ],
+            from: displays
+        ), 1)
+        XCTAssertNil(PickerScreenSelectionPolicy.activeDisplayID(
+            focusedWindowBounds: nil,
+            fallbackWindowBounds: [.zero],
+            from: displays
+        ))
     }
 
     func testDisplayUUIDSelectsThatDisplaysCurrentSpace() {

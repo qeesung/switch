@@ -35,6 +35,12 @@ enum PickerDisplayChoice: String, CaseIterable, Identifiable {
 /// Pure display-selection and managed-Space parsing rules. Live AppKit/SkyLight
 /// queries stay in PickerScreenResolver; this policy is safe for unhosted tests.
 enum PickerScreenSelectionPolicy {
+    struct DisplayBoundsCandidate: Equatable {
+        let displayID: CGDirectDisplayID
+        /// Quartz global coordinates (top-left origin), matching AX window frames.
+        let bounds: CGRect
+    }
+
     struct ScreenCandidate: Equatable {
         let displayID: CGDirectDisplayID
         let frame: CGRect
@@ -67,6 +73,49 @@ enum PickerScreenSelectionPolicy {
         case .primary:
             return candidates.first(where: \.isPrimary) ?? candidates.first
         }
+    }
+
+    /// Resolves a window to the display containing most of it. AX window frames
+    /// and `CGDisplayBounds` share Quartz global coordinates, unlike
+    /// `NSScreen.frame`; keeping this math here prevents accidental coordinate
+    /// mixing when resolving the Active picker display.
+    static func displayContainingMost(
+        of windowBounds: CGRect,
+        from candidates: [DisplayBoundsCandidate]
+    ) -> CGDirectDisplayID? {
+        guard windowBounds.width > 0, windowBounds.height > 0 else { return nil }
+        var best: (displayID: CGDirectDisplayID, area: CGFloat)?
+        for candidate in candidates {
+            let intersection = windowBounds.intersection(candidate.bounds)
+            let area = intersection.isNull ? 0 : intersection.width * intersection.height
+            guard area > 0 else { continue }
+            if best == nil || area > best!.area {
+                best = (candidate.displayID, area)
+            }
+        }
+        return best?.displayID
+    }
+
+    /// Prefer the focused AX window, then walk CGWindowList's front-to-back
+    /// fallback frames until one can be mapped to an attached display.
+    static func activeDisplayID(
+        focusedWindowBounds: CGRect?,
+        fallbackWindowBounds: [CGRect],
+        from candidates: [DisplayBoundsCandidate]
+    ) -> CGDirectDisplayID? {
+        if let focusedWindowBounds,
+           let displayID = displayContainingMost(
+               of: focusedWindowBounds,
+               from: candidates
+           ) {
+            return displayID
+        }
+        for bounds in fallbackWindowBounds {
+            if let displayID = displayContainingMost(of: bounds, from: candidates) {
+                return displayID
+            }
+        }
+        return nil
     }
 
     static func matchManagedDisplay(
