@@ -54,6 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = SwitchModel()
         let window = SwitcherWindow(model: model)
         let hotkey = HotkeyManager()
+        // @Published emits in willSet, before the preference didSet persists to
+        // UserDefaults. Size on the next main-loop turn so calculations observe
+        // the new value rather than lagging one change behind.
+        let resizePicker: () -> Void = { [weak model, weak window] in
+            DispatchQueue.main.async {
+                window?.applyContentSize(for: model?.pickerScreenResolution?.screen)
+            }
+        }
 
         // Most tap callbacks force a pending picker onto screen before acting.
         let present: () -> Void = { [weak self] in self?.presentNowIfPending(window: window) }
@@ -116,49 +124,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         SwitchPreferences.shared.$verticalList
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$thumbnailHeight
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$appIconSize
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$gridColumns
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$maxListRows
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$listWidth
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$showHintStrip
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$verticalShowPreview
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$verticalShowHeader
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         model.$filterHeaderVisible
             .removeDuplicates()
             .dropFirst()
-            .sink { [weak window] _ in window?.applyContentSize() }
+            .sink { _ in resizePicker() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$showThumbnails
             .dropFirst()
-            .sink { [weak self, weak window] enabled in
-                window?.applyContentSize()
+            .sink { [weak self] enabled in
+                resizePicker()
                 if enabled && CGPreflightScreenCaptureAccess() == false {
                     self?.showOnboarding()
                 } else if self?.requiredPermissionsGranted == true {
