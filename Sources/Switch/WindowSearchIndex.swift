@@ -2,33 +2,18 @@ import CoreGraphics
 import Foundation
 
 struct WindowSearchIndex {
-    private struct Entry {
-        let appName: String
-        let title: String
-        let directAppName: String
-        let directTitle: String
-        let phoneticAppName: String
-        let phoneticTitle: String
+    /// Search projections depend only on a source string, so identical app names
+    /// across many windows share one transliteration. This also avoids coupling
+    /// the cache to CGWindowID's real/synthetic/Space-representative namespace.
+    private struct IndexedText {
+        let direct: String
+        let phonetic: String?
 
-        init(_ window: WindowInfo) {
-            appName = window.appName
-            title = window.title
-            directAppName = Self.directText(window.appName)
-            directTitle = Self.directText(window.title)
-            phoneticAppName = Self.phoneticText(window.appName)
-            phoneticTitle = Self.phoneticText(window.title)
-        }
-
-        func matchesSource(_ window: WindowInfo) -> Bool {
-            appName == window.appName && title == window.title
-        }
-
-        private static func directText(_ value: String) -> String {
-            value.lowercased()
-        }
-
-        private static func phoneticText(_ value: String) -> String {
-            WindowSearchIndex.phoneticText(value)
+        init(_ value: String) {
+            direct = value.lowercased()
+            phonetic = WindowSearchIndex.containsIdeographicText(value)
+                ? WindowSearchIndex.phoneticText(value)
+                : nil
         }
     }
 
@@ -44,36 +29,43 @@ struct WindowSearchIndex {
         let originalIndex: Int
     }
 
-    private var entries: [CGWindowID: Entry] = [:]
+    private var entries: [String: IndexedText] = [:]
 
     var cachedEntryCount: Int { entries.count }
 
     mutating func synchronize(with windows: [WindowInfo]) {
-        let liveIDs = Set(windows.map(\.id))
-        entries = entries.filter { liveIDs.contains($0.key) }
+        let liveTexts = Set(windows.flatMap { [$0.appName, $0.title] })
+        entries = entries.filter { liveTexts.contains($0.key) }
 
-        for window in windows where entries[window.id]?.matchesSource(window) != true {
-            entries[window.id] = Entry(window)
+        for text in liveTexts where entries[text] == nil {
+            entries[text] = IndexedText(text)
         }
     }
 
     func filtered(_ windows: [WindowInfo], query: String) -> [WindowInfo] {
         let directPattern = query.lowercased()
         guard !directPattern.isEmpty else { return windows }
-        let phoneticPattern = Self.phoneticText(query)
+        // The pre-pinyin filter treats spaces, periods, and hyphens as literal
+        // query characters. Restrict phonetic fallback to the unambiguous
+        // `feishu` shape so adding transliteration does not broaden those old
+        // queries into `foobar`-style matches.
+        let phoneticPattern = Self.isPlainPinyinQuery(query)
+            ? Self.phoneticText(query)
+            : ""
 
         let matches: [Match] = windows.enumerated().compactMap { originalIndex, window in
-            let entry = entries[window.id] ?? Entry(window)
+            let app = entries[window.appName] ?? IndexedText(window.appName)
+            let title = entries[window.title] ?? IndexedText(window.title)
             if let score = Self.bestScore(
                 pattern: directPattern,
-                targets: [entry.directAppName, entry.directTitle]
+                targets: [app.direct, title.direct]
             ) {
                 return Match(window: window, kind: .direct, score: score, originalIndex: originalIndex)
             }
             guard !phoneticPattern.isEmpty,
                   let score = Self.bestScore(
                     pattern: phoneticPattern,
-                    targets: [entry.phoneticAppName, entry.phoneticTitle]
+                    targets: [app.phonetic, title.phonetic].compactMap { $0 }
                   ) else { return nil }
             return Match(window: window, kind: .phonetic, score: score, originalIndex: originalIndex)
         }
@@ -87,6 +79,16 @@ struct WindowSearchIndex {
 
     private static func bestScore(pattern: String, targets: [String]) -> Int? {
         targets.compactMap { fuzzyScore(pattern: pattern, target: $0) }.max()
+    }
+
+    private static func isPlainPinyinQuery(_ value: String) -> Bool {
+        !value.isEmpty && value.unicodeScalars.allSatisfy {
+            ($0.value >= 65 && $0.value <= 90) || ($0.value >= 97 && $0.value <= 122)
+        }
+    }
+
+    private static func containsIdeographicText(_ value: String) -> Bool {
+        value.unicodeScalars.contains { $0.properties.isIdeographic }
     }
 
     /// Produces compact, lowercase, tone-free Latin text. Compacting whitespace and
