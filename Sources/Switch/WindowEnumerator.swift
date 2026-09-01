@@ -9,6 +9,7 @@ struct WindowInfo: Identifiable, Hashable {
     let bounds: CGRect
     var title: String
     var spaceID: Int?
+    var spaceIDs: Set<Int> = []
     var isCrossSpace: Bool = false
     var isMinimized: Bool = false
     var isHidden: Bool = false
@@ -144,7 +145,12 @@ enum WindowEnumerator {
         }
         let annotatedAll = annotateAndPrune(marked, ax: ax, cid: cid, metadata: metadata, stageManager: stageManager, titlesReliable: titlesReliable)
         // After annotateAndPrune on purpose: ghost detection keys on the CG title (#111).
-        let titledActive = backfillTitles(active, from: ax.titles)
+        // Active windows need the same per-Space annotation as off-screen
+        // windows. With separate Spaces per display, "on screen" spans both
+        // displays and is not enough to identify the Picker Display's Space (#129).
+        let annotatedByID = Dictionary(uniqueKeysWithValues: annotatedAll.map { ($0.id, $0) })
+        let annotatedActive = active.map { annotatedByID[$0.id] ?? $0 }
+        let titledActive = backfillTitles(annotatedActive, from: ax.titles)
         let titledAll = backfillTitles(annotatedAll, from: ax.titles)
         let onScreenIDs = Set(onScreen.map(\.id))
         let allEnumeratedIDs = onScreenIDs.union(everything.map(\.id))
@@ -261,6 +267,7 @@ enum WindowEnumerator {
                     out.spaceLabel = info?.label
                     out.isFullscreenSpace = info?.isFullscreen ?? false
                 }
+                out.spaceIDs = Set(spaces)
                 return out
             }
             if spaces.isEmpty {
@@ -301,6 +308,7 @@ enum WindowEnumerator {
                 out.spaceLabel = info?.label
                 out.isFullscreenSpace = info?.isFullscreen ?? false
             }
+            out.spaceIDs = Set(spaces)
             return out
         }
     }

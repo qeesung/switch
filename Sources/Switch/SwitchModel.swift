@@ -16,6 +16,7 @@ final class SwitchModel: ObservableObject {
     @Published var stickySession = false
     private var currentSpaceOnly = false
     private var armReverse = false
+    private(set) var pickerScreenResolution: PickerScreenResolution?
 
     /// Set by AppDelegate so the view can request a commit + window dismiss from a mouse click.
     var commitAndDismiss: (() -> Void)?
@@ -36,10 +37,14 @@ final class SwitchModel: ObservableObject {
         searchIndex.filtered(windows, query: filterText)
     }
 
-    func arm(_ style: HotkeyManager.ArmStyle) {
+    func arm(
+        _ style: HotkeyManager.ArmStyle,
+        pickerScreenResolution: PickerScreenResolution?
+    ) {
         armGeneration &+= 1
         let gen = armGeneration
         self.mode = style.mode
+        self.pickerScreenResolution = pickerScreenResolution
         stickySession = style.sticky
         currentSpaceOnly = style.currentSpaceOnly
         armReverse = style.reverse
@@ -71,7 +76,8 @@ final class SwitchModel: ObservableObject {
 
         let final: [WindowInfo]
         if mode == .spaces {
-            let active = Int(CGSGetActiveSpace(CGSMainConnectionID()))
+            let active = pickerScreenResolution?.currentSpaceID
+                ?? Int(CGSGetActiveSpace(CGSMainConnectionID()))
             final = snapshot.windows.spaceRepresentatives.map { rep in
                 var out = rep
                 out.isCrossSpace = out.spaceID != active
@@ -155,7 +161,22 @@ final class SwitchModel: ObservableObject {
             cross = cross.filter { $0.pid == f }
         }
         if !SwitchPreferences.shared.showCrossSpace || currentSpaceOnly {
-            cross = cross.filter { !$0.isCrossSpace }
+            if let targetSpaceID = pickerScreenResolution?.currentSpaceID {
+                let belongsToPickerSpace: (WindowInfo) -> Bool = { window in
+                    PickerSpaceWindowPolicy.includes(
+                        claimedSpaceIDs: window.spaceIDs,
+                        isMinimized: window.isMinimized,
+                        isHidden: window.isHidden,
+                        targetSpaceID: targetSpaceID
+                    )
+                }
+                active = active.filter(belongsToPickerSpace)
+                cross = cross.filter(belongsToPickerSpace)
+            } else {
+                // Private display/Space metadata can be unavailable. Preserve
+                // the prior global-current-Space behavior as a safe fallback.
+                cross = cross.filter { !$0.isCrossSpace }
+            }
         }
         let activeFront = WindowMRU.mostRecent(in: active) ?? active.first
         let ws: [WindowInfo]
@@ -386,6 +407,7 @@ final class SwitchModel: ObservableObject {
         windows = []
         thumbnails = [:]
         filterText = ""
+        pickerScreenResolution = nil
         stopRefreshTimer()
         thumbnailTasks.forEach { $0.cancel() }
         thumbnailTasks = []

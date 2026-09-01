@@ -59,7 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let present: () -> Void = { [weak self] in self?.presentNowIfPending(window: window) }
 
         hotkey.onArm = { [weak self] style in
-            model.arm(style)
+            // Resolve Mouse / Active / Primary exactly once per invocation.
+            // Window filtering and panel placement both consume this result (#129).
+            let pickerScreen = PickerScreenResolver.resolve(
+                SwitchPreferences.shared.pickerDisplay
+            )
+            model.arm(style, pickerScreenResolution: pickerScreen)
             self?.schedulePresent(window: window)
         }
         hotkey.onAdvance = { reverse in
@@ -382,18 +387,10 @@ final class SwitcherWindow: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         animationBehavior = SwitchPreferences.shared.disableAnimations ? .none : .default
 
-        let screen: NSScreen?
-        switch SwitchPreferences.shared.pickerDisplay {
-        case .mouse:
-            let cursor = NSEvent.mouseLocation
-            screen = NSScreen.screens.first(where: { NSMouseInRect(cursor, $0.frame, false) })
-                ?? NSScreen.main
-        case .active:
-            // NSScreen.main is the screen holding the key window, not the primary display.
-            screen = NSScreen.main
-        case .primary:
-            screen = NSScreen.screens.first
-        }
+        // Captured when this invocation armed, before the activation delay. Do
+        // not independently re-resolve Picker Display here: a moved mouse or a
+        // key-window change must not make placement disagree with filtering.
+        let screen = model.pickerScreenResolution?.screen ?? NSScreen.main
         applyContentSize(for: screen)
         if let screen {
             let visible = screen.visibleFrame
