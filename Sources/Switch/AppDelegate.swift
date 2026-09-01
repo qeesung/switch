@@ -96,6 +96,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         model.cancelAndDismiss = cancelAndDismiss
         model.onMetricsChange = { [weak window] in window?.applyContentSize() }
+        model.contentDidChange = { [weak model, weak window] in
+            window?.applyContentSize(for: model?.pickerScreenResolution?.screen)
+        }
         hotkey.onCloseSelected = { present(); model.closeSelected() }
         hotkey.onCloseSelectedApp = { present(); model.closeSelectedApp() }
         hotkey.onHideSelected = { present(); model.hideSelected() }
@@ -408,8 +411,12 @@ final class SwitcherWindow: NSPanel {
     }
 
     func applyContentSize(for screen: NSScreen? = nil) {
+        let targetScreen = screen
+            ?? model.pickerScreenResolution?.screen
+            ?? self.screen
+            ?? NSScreen.main
         let itemCount = sizingSession.itemCount(
-            currentCount: model.filteredWindows.count,
+            unfilteredCount: model.windows.count,
             isFiltering: !model.filterText.isEmpty
         )
         let fitted = SwitcherPanelSize.current(
@@ -417,10 +424,13 @@ final class SwitcherWindow: NSPanel {
             itemCount: itemCount,
             metrics: model.metrics,
             filterHeader: model.filterHeaderVisible,
-            screen: screen ?? self.screen ?? NSScreen.main
+            screen: targetScreen
         )
         model.panelSize = CGSize(width: fitted.width, height: fitted.height)
         setContentSize(fitted)
+        if isVisible, let targetScreen {
+            center(on: targetScreen)
+        }
     }
 
     func present() {
@@ -434,13 +444,17 @@ final class SwitcherWindow: NSPanel {
         let screen = model.pickerScreenResolution?.screen ?? NSScreen.main
         applyContentSize(for: screen)
         if let screen {
-            let visible = screen.visibleFrame
-            setFrameOrigin(NSPoint(
-                x: visible.midX - frame.width / 2,
-                y: visible.midY - frame.height / 2
-            ))
+            center(on: screen)
         }
         orderFrontRegardless()
+    }
+
+    private func center(on screen: NSScreen) {
+        let visible = screen.visibleFrame
+        setFrameOrigin(NSPoint(
+            x: visible.midX - frame.width / 2,
+            y: visible.midY - frame.height / 2
+        ))
     }
 
     func dismiss() {

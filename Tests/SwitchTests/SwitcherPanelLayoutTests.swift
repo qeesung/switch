@@ -20,19 +20,27 @@ final class SwitcherPanelLayoutTests: XCTestCase {
 
     func testSizingSessionKeepsUnfilteredCountWhileTypingAndMatchingNothing() {
         var session = PanelSizingSession()
-        XCTAssertEqual(session.itemCount(currentCount: 12, isFiltering: false), 12)
-        XCTAssertEqual(session.itemCount(currentCount: 3, isFiltering: true), 12)
-        XCTAssertEqual(session.itemCount(currentCount: 0, isFiltering: true), 12)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 12, isFiltering: false), 12)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 12, isFiltering: true), 12)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 12, isFiltering: true), 12)
         XCTAssertEqual(session.unfilteredItemCount, 12)
     }
 
     func testSizingSessionRefreshesFullCountAfterFilterIsCleared() {
         var session = PanelSizingSession()
-        _ = session.itemCount(currentCount: 12, isFiltering: false)
-        _ = session.itemCount(currentCount: 2, isFiltering: true)
+        _ = session.itemCount(unfilteredCount: 12, isFiltering: false)
+        _ = session.itemCount(unfilteredCount: 12, isFiltering: true)
 
-        XCTAssertEqual(session.itemCount(currentCount: 12, isFiltering: false), 12)
-        XCTAssertEqual(session.itemCount(currentCount: 9, isFiltering: false), 9)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 12, isFiltering: false), 12)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 9, isFiltering: false), 9)
+    }
+
+    func testSizingSessionLearnsAsyncWindowCountAfterFilteringStarts() {
+        var session = PanelSizingSession()
+        XCTAssertEqual(session.itemCount(unfilteredCount: 0, isFiltering: false), 0)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 0, isFiltering: true), 0)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 20, isFiltering: true), 20)
+        XCTAssertEqual(session.itemCount(unfilteredCount: 24, isFiltering: true), 20)
     }
 
     func testListUsesConfiguredWidthAndMaximumRows() {

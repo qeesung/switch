@@ -28,9 +28,12 @@ struct PanelMetrics: Equatable {
 struct PanelSizingSession: Equatable {
     private(set) var unfilteredItemCount = 0
 
-    mutating func itemCount(currentCount: Int, isFiltering: Bool) -> Int {
-        if !isFiltering {
-            unfilteredItemCount = max(currentCount, 0)
+    mutating func itemCount(unfilteredCount: Int, isFiltering: Bool) -> Int {
+        let count = max(unfilteredCount, 0)
+        if !isFiltering || unfilteredItemCount == 0 {
+            // If enumeration completes after the user starts typing, establish
+            // the missing baseline once; later match-count changes stay stable.
+            unfilteredItemCount = count
         }
         return unfilteredItemCount
     }
