@@ -55,6 +55,12 @@ enum WindowEnumerator {
         var allPIDs: Set<pid_t> { Set(allWindows.map(\.pid)) }
     }
 
+    private struct CGSweep {
+        let windows: [WindowInfo]
+        /// Every raw CGWindowID seen before application/window filtering.
+        let observedIDs: Set<CGWindowID>
+    }
+
     // Ghost-confirmation state. Every access takes `ghostLock`; sweeps run on a
     // background queue and noteSwitchMovedWindow is called from the focus path.
     private static let ghostLock = NSLock()
@@ -111,13 +117,21 @@ enum WindowEnumerator {
     }
 
     static func fullSnapshot() -> FullSnapshot {
-        let onScreen = enumerate(option: [.optionOnScreenOnly, .excludeDesktopElements])
-        let everything = enumerate(option: [.optionAll, .excludeDesktopElements])
+        let stageManager = stageManagerEnabled
+        let onScreenSweep = enumerate(
+            option: [.optionOnScreenOnly, .excludeDesktopElements],
+            stageManager: stageManager
+        )
+        let everythingSweep = enumerate(
+            option: [.optionAll, .excludeDesktopElements],
+            stageManager: stageManager
+        )
+        let onScreen = onScreenSweep.windows
+        let everything = everythingSweep.windows
         let pids = Set(everything.map(\.pid)).union(onScreen.map(\.pid))
         let ax = axWindowState(for: pids)
         let cid = CGSMainConnectionID()
         let metadata = spaceMetadata(cid: cid)
-        let stageManager = stageManagerEnabled
         // Without Screen Recording every CG title is empty, so emptiness is no ghost signal (#106).
         let titlesReliable = CGPreflightScreenCaptureAccess()
 
@@ -133,10 +147,18 @@ enum WindowEnumerator {
         let titledActive = backfillTitles(active, from: ax.titles)
         let titledAll = backfillTitles(annotatedAll, from: ax.titles)
         let onScreenIDs = Set(onScreen.map(\.id))
+        let allEnumeratedIDs = onScreenIDs.union(everything.map(\.id))
         housekeepGhostState(
             onScreen: onScreenIDs,
-            enumerated: onScreenIDs.union(everything.map(\.id)),
+            enumerated: allEnumeratedIDs,
             axBacked: ax.axBacked
+        )
+        // Adapted from PR #100 by Fernando Gutierrez (@Ferezoz): Stage Manager
+        // suspends AX off-stage, so the existing cache is also our historical
+        // proof that a CGWindowID represented a real AX window. Purge it only
+        // after the ID disappears from this complete sweep.
+        AXWindowCache.purge(
+            keeping: onScreenSweep.observedIDs.union(everythingSweep.observedIDs)
         )
         let cross = titledAll.filter { !activeIDs.contains($0.id) }
         let reps = spaceRepresentatives(from: titledAll, cid: cid, metadata: metadata)
@@ -242,12 +264,14 @@ enum WindowEnumerator {
                 return out
             }
             if spaces.isEmpty {
-                // Empty Space list + no AX window = orderOut'd ghost, drop it.
-                // Empty Space list + live AX window = a real window the window
-                // server has ordered out (Stage Manager off-stage). With Stage
-                // Manager off that signature is a closed Settings/Preferences
-                // leftover, so it only survives while Stage Manager is on.
-                guard ax.axBacked.contains(w.id), stageManager else { return nil }
+                // A real off-stage window can lose both its Space assignment and
+                // its current AX tree. The shared AX cache supplies exact-ID
+                // historical evidence without adding a second lifecycle cache.
+                guard StageManagerWindowPolicy.keepsNoSpaceWindow(
+                    stageManagerEnabled: stageManager,
+                    currentlyAXBacked: ax.axBacked.contains(w.id),
+                    historicallyAXBacked: AXWindowCache.element(for: w.id) != nil
+                ) else { return nil }
                 out.isCrossSpace = false
                 return out
             }
@@ -341,10 +365,11 @@ enum WindowEnumerator {
         return (labels, order, currentSpaces)
     }
 
-    private static func enumerate(option: CGWindowListOption) -> [WindowInfo] {
+    private static func enumerate(option: CGWindowListOption, stageManager: Bool) -> CGSweep {
         guard let raw = CGWindowListCopyWindowInfo(option, kCGNullWindowID) as? [[String: Any]] else {
-            return []
+            return CGSweep(windows: [], observedIDs: [])
         }
+        let observedIDs = Set(raw.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
         let blacklist = Set(UserDefaults.standard.stringArray(forKey: SwitchPreferences.blacklistKey) ?? [])
         var blockedPIDs: Set<pid_t> = []
         if !blacklist.isEmpty {
@@ -377,7 +402,14 @@ enum WindowEnumerator {
                 width: boundsDict["Width"] ?? 0,
                 height: boundsDict["Height"] ?? 0
             )
-            if bounds.width < 100 || bounds.height < 80 { continue }
+            // WindowServer can report tiny placeholder bounds for real off-stage
+            // windows. Only titled, layer-zero windows from regular apps reach
+            // this point, so keep that narrow Stage Manager exception (#99).
+            if !StageManagerWindowPolicy.accepts(
+                bounds: bounds,
+                title: title,
+                stageManagerEnabled: stageManager
+            ) { continue }
             if title.isEmpty && titlesReliable
                 && (bounds.width < 400 || bounds.height < 300) { continue }
             // Dedupe by CGWindowID only; it's already unique per window.
@@ -395,6 +427,6 @@ enum WindowEnumerator {
                 bundleID: app?.bundleIdentifier
             ))
         }
-        return out
+        return CGSweep(windows: out, observedIDs: observedIDs)
     }
 }

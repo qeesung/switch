@@ -26,10 +26,10 @@ enum AXWindowCache {
         return cache[wid]
     }
 
-    /// Drop entries whose windows no longer exist anywhere.
-    static func purgeDead() {
-        let raw = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        let live = Set(raw.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+    /// Drop entries whose windows disappeared from WindowEnumerator's complete
+    /// CGWindowList sweep. This keeps the AX history and the enumerator on the
+    /// same view of liveness without performing a second, racing sweep.
+    static func purge(keeping live: Set<CGWindowID>) {
         lock.lock()
         cache = cache.filter { live.contains($0.key) }
         lock.unlock()

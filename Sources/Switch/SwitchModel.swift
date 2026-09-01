@@ -282,9 +282,6 @@ final class SwitchModel: ObservableObject {
             let ws = snap.windows.allWindows
             let liveIDs = Set(ws.map { $0.id })
             WindowMRU.purge(keeping: snap.windows.allIDs)
-            Task.detached(priority: .utility) {
-                AXWindowCache.purgeDead()
-            }
             guard SwitchPreferences.shared.showThumbnails else { return }
             Task {
                 await WindowSnapshotter.shared.purge(keeping: liveIDs)
