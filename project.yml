@@ -21,6 +21,10 @@ targets:
   Switch:
     type: application
     platform: macOS
+    scheme:
+      testTargets:
+        - SwitchTests
+      gatherCoverageData: true
     sources:
       - path: Sources/Switch
     dependencies:
@@ -43,3 +47,18 @@ targets:
       configs:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: com.sanyamgarg.switch.debug
+  SwitchTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/SwitchTests
+      # Compile the exact production logic into an unhosted test bundle. This keeps
+      # pure sizing tests from launching the accessibility-oriented app target.
+      - path: Sources/Switch/SwitchPreferenceRules.swift
+      - path: Sources/Switch/SwitcherPanelLayout.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sanyamgarg.switch.tests
+        PRODUCT_NAME: SwitchTests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
