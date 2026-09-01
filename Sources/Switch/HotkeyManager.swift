@@ -49,7 +49,6 @@ final class HotkeyManager {
     private var armedBinding: HotkeyBinding?
     private var armedSticky = false
     private var armedAt: Date?
-    private var advanced = false
     private var lastShift = false
     private var shiftTapPending = false
     private var suspended = false
@@ -59,7 +58,6 @@ final class HotkeyManager {
     private var tapRunLoop: CFRunLoop?
     private let tapReady = DispatchSemaphore(value: 0)
 
-    private static let stickyQuickTapMS: Double = 200
     private var wakeToken: NSObjectProtocol?
     private var screensWakeToken: NSObjectProtocol?
     private var healthTimer: Timer?
@@ -370,7 +368,6 @@ final class HotkeyManager {
                     shiftTapPending = true
                 } else if shiftFalling && shiftTapPending {
                     shiftTapPending = false
-                    advanced = true
                     stateLock.unlock()
                     DispatchQueue.main.async { [weak self] in
                         self?.onAdvance?(true)
@@ -380,8 +377,7 @@ final class HotkeyManager {
             }
 
             if !armingHeld {
-                let quickTap = (armedAt.map { Date().timeIntervalSince($0) * 1000 < Self.stickyQuickTapMS } ?? false) && !advanced
-                if !armedSticky || quickTap {
+                if PickerSessionReleasePolicy.action(isSticky: armedSticky) == .commit {
                     clearArmedLocked()
                     stateLock.unlock()
                     DispatchQueue.main.async { [weak self] in
@@ -408,9 +404,6 @@ final class HotkeyManager {
             armedBinding = binding
             armedSticky = effective.sticky
             armedAt = Date()
-            advanced = false
-        } else {
-            advanced = true
         }
         stateLock.unlock()
         DispatchQueue.main.async { [weak self] in
@@ -429,7 +422,6 @@ final class HotkeyManager {
         armedBinding = nil
         armedSticky = false
         armedAt = nil
-        advanced = false
         shiftTapPending = false
     }
 
