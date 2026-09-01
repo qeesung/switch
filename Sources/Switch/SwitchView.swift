@@ -85,7 +85,7 @@ struct SwitchView: View {
     }
 
     private var showHeader: Bool {
-        isSpaceMode || !prefs.verticalList || prefs.verticalShowHeader || !model.filterText.isEmpty
+        isSpaceMode || !prefs.verticalList || prefs.verticalShowHeader || model.filterHeaderVisible
     }
 
     private var isSpaceMode: Bool { model.mode == .spaces }
@@ -130,6 +130,11 @@ struct SwitchView: View {
         .offset(y: panelYOffset)
         .opacity(model.visible ? 1 : 0)
         .animation(panelAnimation, value: model.visible)
+        .onPreferenceChange(PanelMetricsKey.self) { measured in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { model.updateMetrics(measured) }
+            }
+        }
         .onChange(of: model.visible) { _, isVisible in
             if isVisible {
                 openMouseLocation = NSEvent.mouseLocation
@@ -166,6 +171,8 @@ struct SwitchView: View {
         }
         .padding(.horizontal, 22)
         .frame(height: 26)
+        .padding(.top, 10)
+        .measureHeight(into: \.headerHeight)
     }
 
     private var grid: some View {
@@ -180,22 +187,22 @@ struct SwitchView: View {
                             LazyVStack(spacing: 4) {
                                 ForEach(Array(list.enumerated()), id: \.element.id) { idx, w in
                                     listRow(window: w, index: idx)
+                                        .measureHeight(into: \.rowHeight)
                                         .id(w.id)
                                 }
                             }
                             .padding(.horizontal, 14)
                             .padding(.top, showHeader ? 10 : 14)
-                            .padding(.bottom, 10)
                         } else {
                             LazyVGrid(columns: gridColumns, spacing: 14) {
                                 ForEach(Array(list.enumerated()), id: \.element.id) { idx, w in
                                     tile(window: w, index: idx, list: list)
+                                        .measureHeight(into: \.tileHeight)
                                         .id(w.id)
                                 }
                             }
                             .padding(.horizontal, 22)
                             .padding(.top, 4)
-                            .padding(.bottom, 12)
                         }
                     }
                     .onChange(of: model.selected) { _, new in
@@ -211,6 +218,9 @@ struct SwitchView: View {
                             proxy.scrollTo(cur[new].id, anchor: .center)
                         }
                     }
+                    // Viewport chrome, not scroll content: no row can occupy this space
+                    // and appear as a clipped sliver at the bottom.
+                    .padding(.bottom, isSpaceMode || prefs.verticalList ? 10 : 12)
                 }
             }
         }
@@ -248,6 +258,7 @@ struct SwitchView: View {
         .padding(.horizontal, 22)
         .padding(.vertical, 8)
         .background(Color.black.opacity(0.18))
+        .measureHeight(into: \.hintHeight)
     }
 
     private var navKey: String {
@@ -535,12 +546,33 @@ private struct SelectionChrome: ViewModifier {
                 ZStack {
                     if selected {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .stroke(accent.opacity(0.7), lineWidth: 1)
+                            .strokeBorder(accent.opacity(0.7), lineWidth: 1)
                             .matchedGeometryEffect(id: "selectionRing", in: namespace)
                     }
                 }
             )
             .animation(selectionAnimation(.spring(response: 0.22, dampingFraction: 0.85)), value: selectedValue)
             .animation(selectionAnimation(.easeOut(duration: 0.10)), value: hovered)
+    }
+}
+
+private struct PanelMetricsKey: PreferenceKey {
+    static let defaultValue = PanelMetrics()
+
+    static func reduce(value: inout PanelMetrics, nextValue: () -> PanelMetrics) {
+        value.merge(nextValue())
+    }
+}
+
+private extension View {
+    /// Reports this component's laid-out height to the AppKit panel sizing layer.
+    func measureHeight(into keyPath: WritableKeyPath<PanelMetrics, CGFloat>) -> some View {
+        background(
+            GeometryReader { proxy in
+                var metrics = PanelMetrics()
+                metrics[keyPath: keyPath] = proxy.size.height
+                return Color.clear.preference(key: PanelMetricsKey.self, value: metrics)
+            }
+        )
     }
 }

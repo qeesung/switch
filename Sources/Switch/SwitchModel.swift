@@ -14,9 +14,25 @@ final class SwitchModel: ObservableObject {
     @Published var panelSize = CGSize(width: 880, height: 560)
     /// Effective sticky for this invocation: global pref or a dedicated sticky binding (#131).
     @Published var stickySession = false
+    /// Once typing reveals a hidden header, keep it for the invocation. Letting the
+    /// header appear and disappear while backspacing would repeatedly resize the panel.
+    @Published private(set) var filterHeaderVisible = false
     private var currentSpaceOnly = false
     private var armReverse = false
     private(set) var pickerScreenResolution: PickerScreenResolution?
+
+    /// Deliberately not @Published: these values arrive during layout, and publishing
+    /// them would make the next layout pass depend on its own output.
+    private(set) var metrics = PanelMetrics()
+    var onMetricsChange: (() -> Void)?
+
+    func updateMetrics(_ new: PanelMetrics) {
+        var merged = metrics
+        merged.mergeKnown(new)
+        guard merged != metrics else { return }
+        metrics = merged
+        onMetricsChange?()
+    }
 
     /// Set by AppDelegate so the view can request a commit + window dismiss from a mouse click.
     var commitAndDismiss: (() -> Void)?
@@ -46,6 +62,7 @@ final class SwitchModel: ObservableObject {
         self.mode = style.mode
         self.pickerScreenResolution = pickerScreenResolution
         stickySession = style.sticky
+        filterHeaderVisible = false
         currentSpaceOnly = style.currentSpaceOnly
         armReverse = style.reverse
         quitPIDs.removeAll()
@@ -376,6 +393,7 @@ final class SwitchModel: ObservableObject {
     }
 
     func appendFilter(_ char: Character) {
+        filterHeaderVisible = true
         filterText.append(char)
         selected = 0
     }
@@ -407,6 +425,7 @@ final class SwitchModel: ObservableObject {
         visible = false
         windows = []
         thumbnails = [:]
+        filterHeaderVisible = false
         filterText = ""
         pickerScreenResolution = nil
         stopRefreshTimer()

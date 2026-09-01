@@ -289,6 +289,27 @@ struct SettingsView: View {
                                 .tint(prefs.accent.color)
                         }
                         Divider().opacity(0.4)
+                        row(title: "Rows",
+                            detail: "Rows visible at once in the list view. \(prefs.maxListRows)") {
+                            Slider(value: Binding(
+                                get: { Double(prefs.maxListRows) },
+                                set: { prefs.maxListRows = Int($0.rounded()) }
+                            ), in: Double(SwitchPreferenceRules.maxListRowsRange.lowerBound)...Double(SwitchPreferenceRules.maxListRowsRange.upperBound), step: 1)
+                                .frame(width: 140)
+                                .tint(prefs.accent.color)
+                        }
+                        Divider().opacity(0.4)
+                        row(title: "List width",
+                            detail: "Width of the vertical list. \(Int(prefs.listWidth))pt") {
+                            Slider(
+                                value: $prefs.listWidth,
+                                in: SwitchPreferenceRules.listWidthRange,
+                                step: 10
+                            )
+                            .frame(width: 140)
+                            .tint(prefs.accent.color)
+                        }
+                        Divider().opacity(0.4)
                         row(title: "Thumbnail size",
                             detail: "Overall picker size. \(Int(prefs.thumbnailHeight))pt") {
                             Slider(value: $prefs.thumbnailHeight, in: 80...300, step: 5)
@@ -304,7 +325,7 @@ struct SettingsView: View {
                         }
                         Divider().opacity(0.4)
                         row(title: "Reset sizing",
-                            detail: "Restore columns, thumbnail size, and app icon size.") {
+                            detail: "Restore columns, list rows and width, thumbnail size, and app icon size.") {
                             Button("Reset") {
                                 resetSizing()
                             }
@@ -404,6 +425,8 @@ struct SettingsView: View {
 
     private func resetSizing() {
         prefs.gridColumns = SwitchPreferences.defaultGridColumns
+        prefs.maxListRows = SwitchPreferences.defaultMaxListRows
+        prefs.listWidth = SwitchPreferences.defaultListWidth
         prefs.thumbnailHeight = SwitchPreferences.defaultThumbnailHeight
         prefs.appIconSize = SwitchPreferences.defaultAppIconSize
     }

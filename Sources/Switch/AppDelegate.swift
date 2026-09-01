@@ -95,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window?.dismiss()
         }
         model.cancelAndDismiss = cancelAndDismiss
+        model.onMetricsChange = { [weak window] in window?.applyContentSize() }
         hotkey.onCloseSelected = { present(); model.closeSelected() }
         hotkey.onCloseSelectedApp = { present(); model.closeSelectedApp() }
         hotkey.onHideSelected = { present(); model.hideSelected() }
@@ -115,6 +116,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak window] _ in window?.applyContentSize() }
             .store(in: &cancellables)
         SwitchPreferences.shared.$thumbnailHeight
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$appIconSize
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$gridColumns
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$maxListRows
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$listWidth
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$showHintStrip
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$verticalShowPreview
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        SwitchPreferences.shared.$verticalShowHeader
+            .dropFirst()
+            .sink { [weak window] _ in window?.applyContentSize() }
+            .store(in: &cancellables)
+        model.$filterHeaderVisible
+            .removeDuplicates()
             .dropFirst()
             .sink { [weak window] _ in window?.applyContentSize() }
             .store(in: &cancellables)
@@ -331,6 +365,7 @@ extension AppDelegate: SPUStandardUserDriverDelegate {
 
 final class SwitcherWindow: NSPanel {
     private let model: SwitchModel
+    private var sizingSession = PanelSizingSession()
 
     init(model: SwitchModel) {
         self.model = model
@@ -373,10 +408,16 @@ final class SwitcherWindow: NSPanel {
     }
 
     func applyContentSize(for screen: NSScreen? = nil) {
+        let itemCount = sizingSession.itemCount(
+            currentCount: model.filteredWindows.count,
+            isFiltering: !model.filterText.isEmpty
+        )
         let fitted = SwitcherPanelSize.current(
             mode: model.mode,
-            itemCount: model.filteredWindows.count,
-            screen: screen
+            itemCount: itemCount,
+            metrics: model.metrics,
+            filterHeader: model.filterHeaderVisible,
+            screen: screen ?? self.screen ?? NSScreen.main
         )
         model.panelSize = CGSize(width: fitted.width, height: fitted.height)
         setContentSize(fitted)
@@ -408,58 +449,153 @@ final class SwitcherWindow: NSPanel {
 }
 
 private enum SwitcherPanelSize {
-    static func current(mode: HotkeyManager.Mode, itemCount: Int, screen: NSScreen?) -> NSSize {
+    static func current(
+        mode: HotkeyManager.Mode,
+        itemCount: Int,
+        metrics: PanelMetrics,
+        filterHeader: Bool,
+        screen: NSScreen?
+    ) -> NSSize {
         let defaults = UserDefaults.standard
         let isList = defaults.bool(forKey: SwitchPreferences.verticalListKey)
         let thumb = CGFloat((defaults.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double) ?? SwitchPreferences.defaultThumbnailHeight)
         let scale = thumb / CGFloat(SwitchPreferences.defaultThumbnailHeight)
         let count = max(itemCount, 1)
+        // Keep this in lockstep with SwitchView.showHeader. A filter can reveal a
+        // preference-hidden header and must budget its height instead of stealing it
+        // from the final complete row.
+        let showsHeader = mode == .spaces || !isList || filterHeader
+            || ((defaults.object(forKey: SwitchPreferences.verticalShowHeaderKey) as? Bool) ?? true)
         // Every mode sizes to the window count; a fixed panel leaves rows of empty backdrop (#134).
-        let size = (mode == .spaces || isList)
-            ? listSize(defaults: defaults, count: count, scale: scale)
-            : gridSize(defaults: defaults, count: count, thumb: thumb, scale: scale)
-        return fit(size, on: screen)
+        if mode == .spaces || isList {
+            return listSize(
+                defaults: defaults,
+                count: count,
+                showsHeader: showsHeader,
+                metrics: metrics,
+                screen: screen
+            )
+        }
+        return gridSize(
+            defaults: defaults,
+            count: count,
+            thumb: thumb,
+            scale: scale,
+            metrics: metrics,
+            screen: screen
+        )
     }
 
-    private static func listSize(defaults: UserDefaults, count: Int, scale: CGFloat) -> NSSize {
+    private static func lineHeight(_ font: NSFont) -> CGFloat {
+        ceil(font.ascender - font.descender + font.leading)
+    }
+
+    // Mirrors hintStrip: one line plus eight points of vertical padding per side.
+    private static let hintStripHeight: CGFloat = {
+        let label = lineHeight(.systemFont(ofSize: 11))
+        let key = lineHeight(.monospacedSystemFont(ofSize: 10, weight: .semibold)) + 2
+        return max(label, key) + 16
+    }()
+
+    // Mirrors listRow: tallest child plus six points of vertical padding per side.
+    private static let listRowTextHeight: CGFloat =
+        lineHeight(.systemFont(ofSize: 13, weight: .medium))
+        + 2
+        + lineHeight(.systemFont(ofSize: 11))
+    private static let listRowPreviewHeight: CGFloat = 50
+    private static let listRowVerticalPadding: CGFloat = 6
+
+    private static func listRowHeight(iconSize: CGFloat, showPreview: Bool) -> CGFloat {
+        var content = max(iconSize, listRowTextHeight)
+        if showPreview { content = max(content, listRowPreviewHeight) }
+        return content + listRowVerticalPadding * 2
+    }
+
+    private static func measured(_ value: CGFloat, fallback: CGFloat) -> CGFloat {
+        value > 0 ? value : fallback
+    }
+
+    private static func listSize(
+        defaults: UserDefaults,
+        count: Int,
+        showsHeader: Bool,
+        metrics: PanelMetrics,
+        screen: NSScreen?
+    ) -> NSSize {
         let showHints = (defaults.object(forKey: SwitchPreferences.showHintStripKey) as? Bool) ?? true
         let showThumbs = (defaults.object(forKey: SwitchPreferences.showThumbnailsKey) as? Bool) ?? true
         let showPreview = ((defaults.object(forKey: SwitchPreferences.verticalShowPreviewKey) as? Bool) ?? true) && showThumbs
-        let hintHeight: CGFloat = showHints ? 38 : 0
-        let rowHeight: CGFloat = showPreview ? 62 : 48
-        let visibleRows = min(count, 8)
-        let rowGaps = CGFloat(max(visibleRows - 1, 0)) * 4
-        let height = 26 + CGFloat(visibleRows) * rowHeight + rowGaps + hintHeight + 20
-        return NSSize(width: 520 * scale, height: min(560 * scale, max(260, height)))
+        let iconSize = CGFloat(
+            (defaults.object(forKey: SwitchPreferences.appIconSizeKey) as? Double)
+                ?? SwitchPreferences.defaultAppIconSize
+        )
+        let hintHeight = showHints ? measured(metrics.hintHeight, fallback: hintStripHeight) : 0
+        let rowHeight = measured(
+            metrics.rowHeight,
+            fallback: listRowHeight(iconSize: iconSize, showPreview: showPreview)
+        )
+        // The measured header includes its 10pt top padding; the initial fallback does too.
+        let headerHeight = showsHeader ? measured(metrics.headerHeight, fallback: 36) : 0
+        let maxRows = SwitchPreferenceRules.clampedMaxListRows(
+            (defaults.object(forKey: SwitchPreferences.maxListRowsKey) as? Int)
+                ?? SwitchPreferences.defaultMaxListRows
+        )
+        let listWidth = SwitchPreferenceRules.resolvedListWidth(
+            storedListWidth: defaults.object(forKey: SwitchPreferences.listWidthKey) as? Double,
+            legacyThumbnailHeight: defaults.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double
+        )
+        let result = SwitcherPanelLayout.list(
+            width: CGFloat(listWidth),
+            itemCount: count,
+            maxRows: maxRows,
+            rowHeight: rowHeight,
+            headerHeight: headerHeight,
+            hintHeight: hintHeight,
+            showsHeader: showsHeader,
+            heightLimit: screen.map { $0.visibleFrame.height * SwitcherPanelLayout.screenFraction }
+        )
+        return NSSize(
+            width: fittedWidth(result.size.width, on: screen),
+            height: result.size.height
+        )
     }
 
-    private static func gridSize(defaults: UserDefaults, count: Int, thumb: CGFloat, scale: CGFloat) -> NSSize {
+    private static func gridSize(
+        defaults: UserDefaults,
+        count: Int,
+        thumb: CGFloat,
+        scale: CGFloat,
+        metrics: PanelMetrics,
+        screen: NSScreen?
+    ) -> NSSize {
         let showHints = (defaults.object(forKey: SwitchPreferences.showHintStripKey) as? Bool) ?? true
         let showThumbs = (defaults.object(forKey: SwitchPreferences.showThumbnailsKey) as? Bool) ?? true
         let tileThumb: CGFloat = showThumbs ? thumb : SwitchPreferences.compactThumbnailHeight
         let configuredColumns = (defaults.object(forKey: SwitchPreferences.gridColumnsKey) as? Int) ?? SwitchPreferences.defaultGridColumns
-        let columns = min(max(configuredColumns, 1), max(count, 3))
         let baseWidth: CGFloat = 880 * scale
-        let horizontalPadding: CGFloat = 44
-        let columnSpacing: CGFloat = 14
-        let usable = baseWidth - horizontalPadding - CGFloat(max(configuredColumns - 1, 0)) * columnSpacing
-        let columnWidth = usable / CGFloat(configuredColumns)
-        let width = horizontalPadding + CGFloat(columns) * columnWidth + CGFloat(max(columns - 1, 0)) * columnSpacing
-
-        let rows = Int(ceil(Double(count) / Double(columns)))
-        let tileHeight = tileThumb + 52
-        let rowsHeight = CGFloat(rows) * tileHeight + CGFloat(max(rows - 1, 0)) * 14
-        let hintHeight: CGFloat = showHints ? 38 : 0
-        let height = 26 + 16 + rowsHeight + hintHeight
-        return NSSize(width: max(560, width), height: min(560 * scale, max(320, height)))
+        let tileHeight = measured(metrics.tileHeight, fallback: tileThumb + 52)
+        let hintHeight = showHints ? measured(metrics.hintHeight, fallback: hintStripHeight) : 0
+        let headerHeight = measured(metrics.headerHeight, fallback: 36)
+        let screenLimit = screen.map { $0.visibleFrame.height * SwitcherPanelLayout.screenFraction }
+        let heightLimit = min(560 * scale, screenLimit ?? .greatestFiniteMagnitude)
+        let result = SwitcherPanelLayout.grid(
+            baseWidth: baseWidth,
+            minimumWidth: 560,
+            itemCount: count,
+            configuredColumns: configuredColumns,
+            tileHeight: tileHeight,
+            headerHeight: headerHeight,
+            hintHeight: hintHeight,
+            heightLimit: heightLimit
+        )
+        return NSSize(
+            width: fittedWidth(result.size.width, on: screen),
+            height: result.size.height
+        )
     }
 
-    private static func fit(_ size: NSSize, on screen: NSScreen?) -> NSSize {
-        guard let screen else { return size }
-        let visible = screen.visibleFrame
-        return NSSize(
-            width: min(size.width, visible.width * 0.92),
-            height: min(size.height, visible.height * 0.92)
-        )
+    private static func fittedWidth(_ width: CGFloat, on screen: NSScreen?) -> CGFloat {
+        guard let screen else { return width }
+        return min(width, screen.visibleFrame.width * SwitcherPanelLayout.screenFraction)
     }
 }

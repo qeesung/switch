@@ -8,6 +8,8 @@ final class SwitchPreferences: ObservableObject {
     nonisolated static let defaultThumbnailHeight = 130.0
     nonisolated static let defaultAppIconSize = 32.0
     nonisolated static let defaultGridColumns = 4
+    nonisolated static let defaultMaxListRows = SwitchPreferenceRules.defaultMaxListRows
+    nonisolated static let defaultListWidth = SwitchPreferenceRules.defaultListWidth
     nonisolated static let defaultPickerActivationDelay = 130.0
     nonisolated static let compactThumbnailHeight = 72.0
 
@@ -168,6 +170,24 @@ final class SwitchPreferences: ObservableObject {
         didSet { UserDefaults.standard.set(appIconSize, forKey: SwitchPreferences.appIconSizeKey) }
     }
 
+    /// Most complete rows shown at once in list view; a short display can allow fewer.
+    @Published var maxListRows: Int {
+        didSet {
+            let value = SwitchPreferenceRules.clampedMaxListRows(maxListRows)
+            if maxListRows != value { maxListRows = value }
+            UserDefaults.standard.set(value, forKey: SwitchPreferences.maxListRowsKey)
+        }
+    }
+
+    /// Width of list layouts. This is independent from grid thumbnail scaling.
+    @Published var listWidth: Double {
+        didSet {
+            let value = SwitchPreferenceRules.clampedListWidth(listWidth)
+            if listWidth != value { listWidth = value }
+            UserDefaults.standard.set(value, forKey: SwitchPreferences.listWidthKey)
+        }
+    }
+
     @Published var gridColumns: Int {
         didSet { UserDefaults.standard.set(gridColumns, forKey: SwitchPreferences.gridColumnsKey) }
     }
@@ -220,6 +240,8 @@ final class SwitchPreferences: ObservableObject {
     nonisolated static let thumbnailHeightKey = "switch.thumbnailHeight"
     nonisolated static let appIconSizeKey = "switch.appIconSize"
     nonisolated static let gridColumnsKey = "switch.gridColumns"
+    nonisolated static let maxListRowsKey = "switch.maxListRows"
+    nonisolated static let listWidthKey = "switch.listWidth"
     nonisolated static let pinnedBundleIDsKey = "switch.pinnedBundleIDs"
     nonisolated static let pickerActivationDelayKey = "switch.pickerActivationDelay"
     nonisolated static let shiftTapReversesKey = "switch.shiftTapReverses"
@@ -252,11 +274,24 @@ final class SwitchPreferences: ObservableObject {
         thumbnailHeight = (UserDefaults.standard.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double) ?? Self.defaultThumbnailHeight
         appIconSize = (UserDefaults.standard.object(forKey: SwitchPreferences.appIconSizeKey) as? Double) ?? Self.defaultAppIconSize
         gridColumns = (UserDefaults.standard.object(forKey: SwitchPreferences.gridColumnsKey) as? Int) ?? Self.defaultGridColumns
+        maxListRows = SwitchPreferenceRules.clampedMaxListRows(
+            (UserDefaults.standard.object(forKey: SwitchPreferences.maxListRowsKey) as? Int)
+                ?? Self.defaultMaxListRows
+        )
+        listWidth = SwitchPreferenceRules.resolvedListWidth(
+            storedListWidth: UserDefaults.standard.object(forKey: SwitchPreferences.listWidthKey) as? Double,
+            legacyThumbnailHeight: UserDefaults.standard.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double
+        )
         pinnedBundleIDs = Set(UserDefaults.standard.stringArray(forKey: SwitchPreferences.pinnedBundleIDsKey) ?? [])
         pickerActivationDelay = (UserDefaults.standard.object(forKey: SwitchPreferences.pickerActivationDelayKey) as? Double) ?? Self.defaultPickerActivationDelay
         shiftTapReverses = UserDefaults.standard.bool(forKey: SwitchPreferences.shiftTapReversesKey)
         hideMinimizedWindows = UserDefaults.standard.bool(forKey: SwitchPreferences.hideMinimizedWindowsKey)
         showNumberKeyHints = UserDefaults.standard.bool(forKey: SwitchPreferences.showNumberKeyHintsKey)
         pickerDisplay = PickerDisplay(rawValue: UserDefaults.standard.string(forKey: SwitchPreferences.pickerDisplayKey) ?? "") ?? .mouse
+
+        // Persist normalized values. For listWidth this is the one-time migration from
+        // the old thumbnail-derived visual width when no dedicated key existed.
+        UserDefaults.standard.set(maxListRows, forKey: SwitchPreferences.maxListRowsKey)
+        UserDefaults.standard.set(listWidth, forKey: SwitchPreferences.listWidthKey)
     }
 }
