@@ -1,7 +1,6 @@
 import Carbon.HIToolbox
 import CoreGraphics
 import XCTest
-@testable import Switch
 
 final class KeyboardLayoutTranslatorTests: XCTestCase {
     @MainActor

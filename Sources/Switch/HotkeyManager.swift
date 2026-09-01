@@ -4,7 +4,7 @@ import Carbon.HIToolbox
 import CoreGraphics
 
 final class HotkeyManager {
-    enum Mode: Equatable { case allWindows, currentApp, spaces }
+    typealias Mode = PickerMode
     enum Direction { case left, right, up, down }
 
     /// How a binding arms the picker: base mode plus per-binding overrides (#131, #130).

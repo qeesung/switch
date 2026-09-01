@@ -1,6 +1,5 @@
 import CoreGraphics
 import XCTest
-@testable import Switch
 
 final class PickerKeyInterpreterTests: XCTestCase {
     func testUSLayoutPrintableCommandsUseLogicalCharacters() {

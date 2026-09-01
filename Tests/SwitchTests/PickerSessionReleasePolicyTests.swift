@@ -1,5 +1,4 @@
 import XCTest
-@testable import Switch
 
 final class PickerSessionReleasePolicyTests: XCTestCase {
     func testRegularSessionCommitsWhenArmingModifiersAreReleased() {

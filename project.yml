@@ -52,13 +52,24 @@ targets:
     platform: macOS
     sources:
       - path: Tests/SwitchTests
-      # Compile the exact production logic into an unhosted test bundle. This keeps
-      # pure sizing tests from launching the accessibility-oriented app target.
+      # Compile the exact production policy/index files into an unhosted test
+      # bundle. Tests never launch the accessibility-oriented application target.
+      - path: Sources/Switch/AXWindowCache.swift
+      - path: Sources/Switch/KeyboardLayoutTranslator.swift
+      - path: Sources/Switch/PickerArmTransitionPolicy.swift
+      - path: Sources/Switch/PickerKeyInterpreter.swift
+      - path: Sources/Switch/PickerScreenSelectionPolicy.swift
+      - path: Sources/Switch/PickerSessionReleasePolicy.swift
       - path: Sources/Switch/SwitchPreferenceRules.swift
       - path: Sources/Switch/SwitcherPanelLayout.swift
+      - path: Sources/Switch/WindowInfo.swift
+      - path: Sources/Switch/WindowSearchIndex.swift
+      - path: Sources/Switch/WindowSelectionPolicy.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sanyamgarg.switch.tests
         PRODUCT_NAME: SwitchTests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+        BUNDLE_LOADER: ""
+        TEST_HOST: ""

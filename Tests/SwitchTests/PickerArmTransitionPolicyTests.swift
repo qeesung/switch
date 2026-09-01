@@ -1,5 +1,4 @@
 import XCTest
-@testable import Switch
 
 final class PickerArmTransitionPolicyTests: XCTestCase {
     func testFirstTriggerArms() {
@@ -42,7 +41,7 @@ final class PickerArmTransitionPolicyTests: XCTestCase {
     }
 
     private func identity(
-        _ mode: HotkeyManager.Mode,
+        _ mode: PickerMode,
         sticky: Bool = false,
         currentSpaceOnly: Bool = false
     ) -> PickerArmTransitionPolicy.Identity {

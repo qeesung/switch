@@ -1,6 +1,12 @@
+enum PickerMode: Equatable {
+    case allWindows
+    case currentApp
+    case spaces
+}
+
 enum PickerArmTransitionPolicy {
     struct Identity: Equatable {
-        let mode: HotkeyManager.Mode
+        let mode: PickerMode
         let sticky: Bool
         let currentSpaceOnly: Bool
     }
