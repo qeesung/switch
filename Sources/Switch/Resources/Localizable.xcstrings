@@ -370,40 +370,6 @@
         }
       }
     },
-    "Clear primary shortcut": {
-      "comment": "Help for clearing primary hotkey",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear primary shortcut"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除主要快捷键"
-          }
-        }
-      }
-    },
-    "Clear alternate shortcut": {
-      "comment": "Help for clearing alternate hotkey",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear alternate shortcut"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除备用快捷键"
-          }
-        }
-      }
-    },
     "Not set": {
       "comment": "Empty hotkey placeholder",
       "localizations": {
@@ -434,23 +400,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "请按键…"
-          }
-        }
-      }
-    },
-    "Clear": {
-      "comment": "Clear sticky toggle",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "清除"
           }
         }
       }
@@ -1318,23 +1267,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "还原尺寸"
-          }
-        }
-      }
-    },
-    "Restore columns, thumbnail size, and app icon size.": {
-      "comment": "Settings row detail",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restore columns, thumbnail size, and app icon size."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "还原列数、缩略图大小和应用图标大小。"
           }
         }
       }

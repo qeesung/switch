@@ -26,6 +26,16 @@ jq -e '.sourceLanguage == "en" and .version == "1.0" and (.strings | type == "ob
 jq -e '.sourceLanguage == "en" and .version == "1.0" and (.strings | type == "object")' \
     "$info_catalog" >/dev/null
 
+for catalog in "$localizable_catalog" "$info_catalog"; do
+    extra_locales="$(jq -r '
+        [.strings[] | (.localizations // {}) | keys[]]
+        | unique - ["en", "zh-Hans"]
+        | .[]
+    ' "$catalog")"
+    [[ -z "$extra_locales" ]] \
+        || fail "$catalog contains unsupported locales: $extra_locales"
+done
+
 # Accept both a direct stringUnit and plural/device variations. Every localized leaf
 # must be explicitly translated and non-empty.
 incomplete_catalog_entries="$(jq -r '
@@ -48,13 +58,26 @@ incomplete_catalog_entries="$(jq -r '
     || fail "catalog entries lack complete en/zh-Hans translations: $incomplete_catalog_entries"
 
 for permission_key in NSAppleEventsUsageDescription NSScreenCaptureUsageDescription; do
-    jq -e --arg key "$permission_key" '
-        .strings[$key].localizations["zh-Hans"].stringUnit
-        | .state == "translated"
-          and (.value | type == "string" and length > 0)
-    ' "$info_catalog" >/dev/null \
-        || fail "InfoPlist.xcstrings lacks a translated zh-Hans $permission_key"
+    for locale in en zh-Hans; do
+        jq -e --arg key "$permission_key" --arg locale "$locale" '
+            .strings[$key].localizations[$locale].stringUnit
+            | .state == "translated"
+              and (.value | type == "string" and length > 0)
+        ' "$info_catalog" >/dev/null \
+            || fail "InfoPlist.xcstrings lacks a translated $locale $permission_key"
+    done
 done
+
+placeholder_mismatches="$(jq -r '
+    .strings | to_entries[]
+    | select(.value.shouldTranslate != false)
+    | (.value.localizations.en.stringUnit.value // "") as $en
+    | (.value.localizations["zh-Hans"].stringUnit.value // "") as $zh
+    | select(([$en | scan("%(?:lld|@)")] | sort) != ([$zh | scan("%(?:lld|@)")] | sort))
+    | .key
+' "$localizable_catalog")"
+[[ -z "$placeholder_mismatches" ]] \
+    || fail "en/zh-Hans format placeholders differ: $placeholder_mismatches"
 
 [[ -n "$derived_data_path" ]] || exit 0
 [[ -d "$derived_data_path" ]] || fail "DerivedData directory does not exist: $derived_data_path"
