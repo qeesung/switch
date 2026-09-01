@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: macOS 26 / Xcode 26.6
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEBUG_DERIVED_DATA: ${{ github.workspace }}/DerivedData/Debug
+      RELEASE_DERIVED_DATA: ${{ github.workspace }}/DerivedData/Release
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode 26.6
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.6'
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version | tee /tmp/switch-xcode-version.txt
+          grep -Fx 'Xcode 26.6' /tmp/switch-xcode-version.txt
+          swift --version
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Run static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; YAML.safe_load(File.read("project.yml"), aliases: true)'
+          find Sources Tests -type f -name '*.swift' -print0 | xargs -0 xcrun swiftc -parse
+          plutil -lint Sources/Switch/Resources/Info.plist Sources/Switch/Resources/Switch.entitlements
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(find scripts tools -type f -name '*.sh' -print0)
+          git diff --check HEAD^1 HEAD
+          bash scripts/validate-localizations.sh
+
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml
+          xcodebuild -project Switch.xcodeproj -list -json > /tmp/switch-project.json
+          jq -e '.project.targets | index("SwitchTests") != null' /tmp/switch-project.json
+          jq -e '.project.schemes | index("Switch") != null' /tmp/switch-project.json
+          grep -Fq 'Localizable.xcstrings' Switch.xcodeproj/project.pbxproj
+          grep -Fq 'InfoPlist.xcstrings' Switch.xcodeproj/project.pbxproj
+
+      - name: Run Debug tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Switch.xcodeproj \
+            -scheme Switch \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DEBUG_DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            DEVELOPMENT_TEAM= \
+            SWIFT_EMIT_LOC_STRINGS=YES \
+            test
+          bash scripts/validate-localizations.sh "$DEBUG_DERIVED_DATA"
+
+      - name: Build unsigned Release app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Switch.xcodeproj \
+            -scheme Switch \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RELEASE_DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            DEVELOPMENT_TEAM= \
+            SWIFT_EMIT_LOC_STRINGS=YES \
+            build
+          bash scripts/validate-localizations.sh "$RELEASE_DERIVED_DATA"
+
+      - name: Verify localized app resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_app="$RELEASE_DERIVED_DATA/Build/Products/Release/Switch.app"
+          localizable="$release_app/Contents/Resources/zh-Hans.lproj/Localizable.strings"
+          info_strings="$release_app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings"
+          test -d "$release_app"
+          test -s "$localizable"
+          test -s "$info_strings"
+          plutil -lint "$localizable" "$info_strings"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$release_app" "${{ runner.temp }}/Switch-unsigned-Release.zip"
+
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switch-unsigned-Release
+          path: ${{ runner.temp }}/Switch-unsigned-Release.zip
+          if-no-files-found: error
+          retention-days: 7
