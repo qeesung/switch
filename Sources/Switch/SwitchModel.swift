@@ -167,6 +167,7 @@ final class SwitchModel: ObservableObject {
                         claimedSpaceIDs: window.spaceIDs,
                         isMinimized: window.isMinimized,
                         isHidden: window.isHidden,
+                        isConfirmedStageManagerOffstage: window.isStageManagerOffstage,
                         targetSpaceID: targetSpaceID
                     )
                 }

@@ -13,6 +13,9 @@ struct WindowInfo: Identifiable, Hashable {
     var isCrossSpace: Bool = false
     var isMinimized: Bool = false
     var isHidden: Bool = false
+    /// Space-less Stage Manager window retained only after an exact current or
+    /// historical AXWindowCache ID match (#99).
+    var isStageManagerOffstage = false
     var spaceLabel: String?
     var isFullscreenSpace: Bool = false
     var isWindowless: Bool = false
@@ -280,6 +283,7 @@ enum WindowEnumerator {
                     historicallyAXBacked: AXWindowCache.element(for: w.id) != nil
                 ) else { return nil }
                 out.isCrossSpace = false
+                out.isStageManagerOffstage = true
                 return out
             }
             if !ax.axBacked.contains(w.id) {

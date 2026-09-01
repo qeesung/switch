@@ -18,16 +18,19 @@ enum StageManagerWindowPolicy {
 }
 
 /// Determines which enumerated windows belong to the Picker Display's current
-/// Space. A window may claim multiple Spaces; minimized/hidden windows with no
-/// claim retain the compatibility behavior introduced for older macOS (#129).
+/// Space. A window may claim multiple Spaces; minimized/hidden windows retain
+/// the older-macOS compatibility behavior, while #99's exact-AX-confirmed Stage
+/// Manager windows retain their narrow no-Space exception.
 enum PickerSpaceWindowPolicy {
     static func includes(
         claimedSpaceIDs: Set<Int>,
         isMinimized: Bool,
         isHidden: Bool,
+        isConfirmedStageManagerOffstage: Bool,
         targetSpaceID: Int
     ) -> Bool {
         if claimedSpaceIDs.contains(targetSpaceID) { return true }
-        return claimedSpaceIDs.isEmpty && (isMinimized || isHidden)
+        guard claimedSpaceIDs.isEmpty else { return false }
+        return isMinimized || isHidden || isConfirmedStageManagerOffstage
     }
 }

@@ -165,30 +165,63 @@ final class WindowPolicyTests: XCTestCase {
             claimedSpaceIDs: [10, 20],
             isMinimized: false,
             isHidden: false,
+            isConfirmedStageManagerOffstage: false,
             targetSpaceID: 20
         ))
         XCTAssertFalse(PickerSpaceWindowPolicy.includes(
             claimedSpaceIDs: [10],
             isMinimized: false,
             isHidden: false,
+            isConfirmedStageManagerOffstage: false,
             targetSpaceID: 20
         ))
         XCTAssertTrue(PickerSpaceWindowPolicy.includes(
             claimedSpaceIDs: [],
             isMinimized: true,
             isHidden: false,
+            isConfirmedStageManagerOffstage: false,
             targetSpaceID: 20
         ))
         XCTAssertTrue(PickerSpaceWindowPolicy.includes(
             claimedSpaceIDs: [],
             isMinimized: false,
             isHidden: true,
+            isConfirmedStageManagerOffstage: false,
             targetSpaceID: 20
         ))
         XCTAssertFalse(PickerSpaceWindowPolicy.includes(
             claimedSpaceIDs: [],
             isMinimized: false,
             isHidden: false,
+            isConfirmedStageManagerOffstage: false,
+            targetSpaceID: 20
+        ))
+    }
+
+    func testConfirmedStageManagerNoSpaceWindowSurvivesPickerSpaceFilter() {
+        let confirmedByExactAXEvidence = StageManagerWindowPolicy.keepsNoSpaceWindow(
+            stageManagerEnabled: true,
+            currentlyAXBacked: false,
+            historicallyAXBacked: true
+        )
+        let rejectedWithoutAXEvidence = StageManagerWindowPolicy.keepsNoSpaceWindow(
+            stageManagerEnabled: true,
+            currentlyAXBacked: false,
+            historicallyAXBacked: false
+        )
+
+        XCTAssertTrue(PickerSpaceWindowPolicy.includes(
+            claimedSpaceIDs: [],
+            isMinimized: false,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: confirmedByExactAXEvidence,
+            targetSpaceID: 20
+        ))
+        XCTAssertFalse(PickerSpaceWindowPolicy.includes(
+            claimedSpaceIDs: [],
+            isMinimized: false,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: rejectedWithoutAXEvidence,
             targetSpaceID: 20
         ))
     }
