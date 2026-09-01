@@ -25,6 +25,10 @@ jobs:
     env:
       DEBUG_DERIVED_DATA: ${{ github.workspace }}/DerivedData/Debug
       RELEASE_DERIVED_DATA: ${{ github.workspace }}/DerivedData/Release
+      CI_EVENT_NAME: ${{ github.event_name }}
+      CI_BASE_REF: ${{ github.base_ref }}
+      CI_BEFORE_SHA: ${{ github.event.before }}
+      CI_REF_NAME: ${{ github.ref_name }}
 
     steps:
       - name: Check out repository
@@ -63,6 +67,20 @@ jobs:
             bash -n "$script"
           done < <(find scripts tools -type f -name '*.sh' -print0)
           git diff --check
+          comparison_base=""
+          if [[ "$CI_EVENT_NAME" == "push" \
+                && -n "$CI_BEFORE_SHA" \
+                && ! "$CI_BEFORE_SHA" =~ ^0+$ ]] \
+                && git cat-file -e "$CI_BEFORE_SHA^{commit}" 2>/dev/null; then
+            comparison_base="$CI_BEFORE_SHA"
+          elif [[ "$CI_EVENT_NAME" == "pull_request" && -n "$CI_BASE_REF" ]]; then
+            comparison_base="$(git merge-base HEAD "origin/$CI_BASE_REF")"
+          elif [[ "$CI_REF_NAME" == codex/validate-* ]]; then
+            comparison_base="$(git merge-base HEAD origin/main)"
+          fi
+          if [[ -n "$comparison_base" ]]; then
+            git diff --check "$comparison_base" HEAD
+          fi
           bash scripts/validate-localizations.sh
 
       - name: Generate Xcode project
@@ -118,13 +136,15 @@ jobs:
           set -euo pipefail
           debug_app="$DEBUG_DERIVED_DATA/Build/Products/Debug/Switch.app"
           release_app="$RELEASE_DERIVED_DATA/Build/Products/Release/Switch.app"
-          localizable="$release_app/Contents/Resources/zh-Hans.lproj/Localizable.strings"
-          info_strings="$release_app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings"
           test -d "$debug_app"
           test -d "$release_app"
-          test -s "$localizable"
-          test -s "$info_strings"
-          plutil -lint "$localizable" "$info_strings"
+          for locale in en zh-Hans; do
+            localizable="$release_app/Contents/Resources/$locale.lproj/Localizable.strings"
+            info_strings="$release_app/Contents/Resources/$locale.lproj/InfoPlist.strings"
+            test -s "$localizable"
+            test -s "$info_strings"
+            plutil -lint "$localizable" "$info_strings"
+          done
           ditto -c -k --sequesterRsrc --keepParent \
             "$debug_app" "${{ runner.temp }}/Switch-unsigned-Debug.zip"
 
