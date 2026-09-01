@@ -2,26 +2,6 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-struct WindowInfo: Identifiable, Hashable {
-    let id: CGWindowID
-    let pid: pid_t
-    let appName: String
-    let bounds: CGRect
-    var title: String
-    var spaceID: Int?
-    var spaceIDs: Set<Int> = []
-    var isCrossSpace: Bool = false
-    var isMinimized: Bool = false
-    var isHidden: Bool = false
-    /// Space-less Stage Manager window retained only after an exact current or
-    /// historical AXWindowCache ID match (#99).
-    var isStageManagerOffstage = false
-    var spaceLabel: String?
-    var isFullscreenSpace: Bool = false
-    var isWindowless: Bool = false
-    var bundleID: String?
-}
-
 enum WindowEnumerator {
     private static let skipApps: Set<String> = [
         "Window Server", "Dock", "SystemUIServer", "Control Center",
@@ -63,6 +43,9 @@ enum WindowEnumerator {
         let windows: [WindowInfo]
         /// Every raw CGWindowID seen before application/window filtering.
         let observedIDs: Set<CGWindowID>
+        /// `false` means WindowServer returned no list; callers must not treat
+        /// that transient failure as proof that every cached window disappeared.
+        let completed: Bool
     }
 
     // Ghost-confirmation state. Every access takes `ghostLock`; sweeps run on a
@@ -132,8 +115,15 @@ enum WindowEnumerator {
         )
         let onScreen = onScreenSweep.windows
         let everything = everythingSweep.windows
+        let observedWindowIDs = onScreenSweep.observedIDs.union(everythingSweep.observedIDs)
+        // Purge from the complete CG snapshot before this pass stores fresh AX
+        // elements. Doing it afterwards can delete a window created between the
+        // CG and AX reads; a failed .optionAll query must never empty the cache.
+        if everythingSweep.completed {
+            AXWindowCache.purge(keeping: observedWindowIDs)
+        }
         let pids = Set(everything.map(\.pid)).union(onScreen.map(\.pid))
-        let ax = axWindowState(for: pids)
+        let ax = axWindowState(for: pids, observedWindowIDs: observedWindowIDs)
         let cid = CGSMainConnectionID()
         let metadata = spaceMetadata(cid: cid)
         // Without Screen Recording every CG title is empty, so emptiness is no ghost signal (#106).
@@ -161,13 +151,6 @@ enum WindowEnumerator {
             onScreen: onScreenIDs,
             enumerated: allEnumeratedIDs,
             axBacked: ax.axBacked
-        )
-        // Adapted from PR #100 by Fernando Gutierrez (@Ferezoz): Stage Manager
-        // suspends AX off-stage, so the existing cache is also our historical
-        // proof that a CGWindowID represented a real AX window. Purge it only
-        // after the ID disappears from this complete sweep.
-        AXWindowCache.purge(
-            keeping: onScreenSweep.observedIDs.union(everythingSweep.observedIDs)
         )
         let cross = titledAll.filter { !activeIDs.contains($0.id) }
         let reps = spaceRepresentatives(from: titledAll, cid: cid, metadata: metadata)
@@ -200,13 +183,20 @@ enum WindowEnumerator {
     }
 
     // AX-backed windows, minimized window IDs, and AX titles for the given processes; an orderedOut leftover appears in neither.
-    private static func axWindowState(for pids: Set<pid_t>) -> (axBacked: Set<CGWindowID>, minimized: Set<CGWindowID>, titles: [CGWindowID: String]) {
+    private static func axWindowState(
+        for pids: Set<pid_t>,
+        observedWindowIDs: Set<CGWindowID>
+    ) -> (axBacked: Set<CGWindowID>, minimized: Set<CGWindowID>, titles: [CGWindowID: String]) {
         var axBacked: Set<CGWindowID> = []
         var minimized: Set<CGWindowID> = []
         var titles: [CGWindowID: String] = [:]
         for pid in pids {
             for ax in AXHelpers.windowList(of: appElement(for: pid)) {
                 guard let id = AXHelpers.windowID(of: ax) else { continue }
+                // The AX query happens after the complete CG sweep. Do not let
+                // an element created (or closing) in that gap seed historical
+                // evidence until a CG snapshot has also observed its exact ID.
+                guard observedWindowIDs.contains(id) else { continue }
                 axBacked.insert(id)
                 AXWindowCache.store(ax, for: id)
                 let title = AXHelpers.title(of: ax)
@@ -260,7 +250,8 @@ enum WindowEnumerator {
                 // A window with no Space claim counts as current, older macOS drops the assignment once a window is ordered out (#129).
                 out.isCrossSpace = !spaces.isEmpty && !spaces.contains(where: { metadata.currentSpaces.contains($0) })
                 // A window AX ever backed is real; the cache outlives per-sweep AX gaps (timeouts, Chromium's off-Space omissions), so a never-backed CG entry is an Electron shell (#126).
-                let everBacked = ax.axBacked.contains(w.id) || AXWindowCache.element(for: w.id) != nil
+                let everBacked = ax.axBacked.contains(w.id)
+                    || AXWindowCache.hasHistoricalEvidence(for: w.id)
                 // Same real-window signature as the cross-Space prune below, for windows hidden before Switch ever saw them.
                 let offSpaceReal = out.isCrossSpace && (!titlesReliable || !w.title.isEmpty)
                 guard everBacked || offSpaceReal else { return nil }
@@ -280,7 +271,7 @@ enum WindowEnumerator {
                 guard StageManagerWindowPolicy.keepsNoSpaceWindow(
                     stageManagerEnabled: stageManager,
                     currentlyAXBacked: ax.axBacked.contains(w.id),
-                    historicallyAXBacked: AXWindowCache.element(for: w.id) != nil
+                    historicallyAXBacked: AXWindowCache.hasHistoricalEvidence(for: w.id)
                 ) else { return nil }
                 out.isCrossSpace = false
                 out.isStageManagerOffstage = true
@@ -338,7 +329,9 @@ enum WindowEnumerator {
                 appName: info?.label ?? String(localized: "Desktop", comment: "Fallback Space name"),
                 bounds: target.bounds,
                 title: detail,
+                displayID: target.displayID,
                 spaceID: sid,
+                spaceIDs: [sid],
                 isCrossSpace: sid != active,
                 isMinimized: false,
                 isHidden: false,
@@ -379,9 +372,10 @@ enum WindowEnumerator {
 
     private static func enumerate(option: CGWindowListOption, stageManager: Bool) -> CGSweep {
         guard let raw = CGWindowListCopyWindowInfo(option, kCGNullWindowID) as? [[String: Any]] else {
-            return CGSweep(windows: [], observedIDs: [])
+            return CGSweep(windows: [], observedIDs: [], completed: false)
         }
         let observedIDs = Set(raw.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+        let displayBounds = activeDisplayBounds()
         let blacklist = Set(UserDefaults.standard.stringArray(forKey: SwitchPreferences.blacklistKey) ?? [])
         var blockedPIDs: Set<pid_t> = []
         if !blacklist.isEmpty {
@@ -435,10 +429,35 @@ enum WindowEnumerator {
                 appName: appName,
                 bounds: bounds,
                 title: title,
+                displayID: displayContainingMost(of: bounds, candidates: displayBounds),
                 isHidden: app?.isHidden == true,
                 bundleID: app?.bundleIdentifier
             ))
         }
-        return CGSweep(windows: out, observedIDs: observedIDs)
+        return CGSweep(windows: out, observedIDs: observedIDs, completed: true)
+    }
+
+    private static func activeDisplayBounds() -> [(CGDirectDisplayID, CGRect)] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else { return [] }
+        return displays.prefix(Int(count)).map { ($0, CGDisplayBounds($0)) }
+    }
+
+    private static func displayContainingMost(
+        of bounds: CGRect,
+        candidates: [(CGDirectDisplayID, CGRect)]
+    ) -> CGDirectDisplayID? {
+        var best: (id: CGDirectDisplayID, area: CGFloat)?
+        for (displayID, displayBounds) in candidates {
+            let intersection = bounds.intersection(displayBounds)
+            let area: CGFloat = intersection.isNull ? 0 : intersection.width * intersection.height
+            guard area > 0 else { continue }
+            if best == nil || area > best!.area {
+                best = (displayID, area)
+            }
+        }
+        return best?.id
     }
 }

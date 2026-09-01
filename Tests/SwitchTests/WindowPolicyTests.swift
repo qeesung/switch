@@ -1,7 +1,6 @@
 import ApplicationServices
 import CoreGraphics
 import XCTest
-@testable import Switch
 
 final class WindowPolicyTests: XCTestCase {
     func testStageManagerAllowsOnlyTitledSmallWindows() {
@@ -21,6 +20,11 @@ final class WindowPolicyTests: XCTestCase {
             bounds: small,
             title: "Reminders",
             stageManagerEnabled: false
+        ))
+        XCTAssertFalse(StageManagerWindowPolicy.accepts(
+            bounds: .zero,
+            title: "Overlay",
+            stageManagerEnabled: true
         ))
     }
 
@@ -70,14 +74,14 @@ final class WindowPolicyTests: XCTestCase {
     }
 
     func testPickerDisplayChoiceResolvesMouseActiveAndPrimaryIndependently() {
-        let primary = PickerScreenResolver.ScreenCandidate(
+        let primary = PickerScreenSelectionPolicy.ScreenCandidate(
             displayID: 1,
             frame: CGRect(x: 0, y: 0, width: 100, height: 100),
             isActive: false,
             isPrimary: true,
             displayUUID: "PRIMARY-UUID"
         )
-        let active = PickerScreenResolver.ScreenCandidate(
+        let active = PickerScreenSelectionPolicy.ScreenCandidate(
             displayID: 2,
             frame: CGRect(x: 100, y: 0, width: 100, height: 100),
             isActive: true,
@@ -86,17 +90,17 @@ final class WindowPolicyTests: XCTestCase {
         )
         let screens = [primary, active]
 
-        XCTAssertEqual(PickerScreenResolver.select(
+        XCTAssertEqual(PickerScreenSelectionPolicy.select(
             .mouse,
             from: screens,
             mouseLocation: CGPoint(x: 150, y: 50)
         )?.displayID, 2)
-        XCTAssertEqual(PickerScreenResolver.select(
+        XCTAssertEqual(PickerScreenSelectionPolicy.select(
             .active,
             from: screens,
             mouseLocation: .zero
         )?.displayID, 2)
-        XCTAssertEqual(PickerScreenResolver.select(
+        XCTAssertEqual(PickerScreenSelectionPolicy.select(
             .primary,
             from: screens,
             mouseLocation: .zero
@@ -105,17 +109,17 @@ final class WindowPolicyTests: XCTestCase {
 
     func testDisplayUUIDSelectsThatDisplaysCurrentSpace() {
         let displays = [
-            PickerScreenResolver.ManagedDisplay(
+            PickerScreenSelectionPolicy.ManagedDisplay(
                 identifier: "PRIMARY-UUID",
                 currentSpaceID: 1044
             ),
-            PickerScreenResolver.ManagedDisplay(
+            PickerScreenSelectionPolicy.ManagedDisplay(
                 identifier: "active-uuid",
                 currentSpaceID: 1279
             ),
         ]
 
-        let match = PickerScreenResolver.matchManagedDisplay(
+        let match = PickerScreenSelectionPolicy.matchManagedDisplay(
             displayUUID: "ACTIVE-UUID",
             isPrimary: false,
             from: displays
@@ -126,7 +130,7 @@ final class WindowPolicyTests: XCTestCase {
     }
 
     func testManagedDisplayParserReadsCurrentSpaceIDs() {
-        let parsed = PickerScreenResolver.managedDisplays(from: [
+        let parsed = PickerScreenSelectionPolicy.managedDisplays(from: [
             [
                 "Display Identifier": "DISPLAY-A",
                 "Current Space": ["id64": NSNumber(value: 1044)],
@@ -138,22 +142,22 @@ final class WindowPolicyTests: XCTestCase {
         ])
 
         XCTAssertEqual(parsed, [
-            PickerScreenResolver.ManagedDisplay(identifier: "DISPLAY-A", currentSpaceID: 1044),
-            PickerScreenResolver.ManagedDisplay(identifier: "DISPLAY-B", currentSpaceID: 1279),
+            PickerScreenSelectionPolicy.ManagedDisplay(identifier: "DISPLAY-A", currentSpaceID: 1044),
+            PickerScreenSelectionPolicy.ManagedDisplay(identifier: "DISPLAY-B", currentSpaceID: 1279),
         ])
     }
 
     func testPrimaryDisplaySupportsMainManagedIdentifierFallback() {
         let displays = [
-            PickerScreenResolver.ManagedDisplay(identifier: "Main", currentSpaceID: 42),
+            PickerScreenSelectionPolicy.ManagedDisplay(identifier: "Main", currentSpaceID: 42),
         ]
 
-        XCTAssertEqual(PickerScreenResolver.matchManagedDisplay(
+        XCTAssertEqual(PickerScreenSelectionPolicy.matchManagedDisplay(
             displayUUID: "UUID-NOT-EXPOSED-BY-CGS",
             isPrimary: true,
             from: displays
         )?.currentSpaceID, 42)
-        XCTAssertNil(PickerScreenResolver.matchManagedDisplay(
+        XCTAssertNil(PickerScreenSelectionPolicy.matchManagedDisplay(
             displayUUID: "UUID-NOT-EXPOSED-BY-CGS",
             isPrimary: false,
             from: displays
@@ -215,7 +219,18 @@ final class WindowPolicyTests: XCTestCase {
             isMinimized: false,
             isHidden: false,
             isConfirmedStageManagerOffstage: confirmedByExactAXEvidence,
-            targetSpaceID: 20
+            targetSpaceID: 20,
+            windowDisplayID: 2,
+            targetDisplayID: 2
+        ))
+        XCTAssertFalse(PickerSpaceWindowPolicy.includes(
+            claimedSpaceIDs: [],
+            isMinimized: false,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: confirmedByExactAXEvidence,
+            targetSpaceID: 20,
+            windowDisplayID: 1,
+            targetDisplayID: 2
         ))
         XCTAssertFalse(PickerSpaceWindowPolicy.includes(
             claimedSpaceIDs: [],
@@ -223,6 +238,69 @@ final class WindowPolicyTests: XCTestCase {
             isHidden: false,
             isConfirmedStageManagerOffstage: rejectedWithoutAXEvidence,
             targetSpaceID: 20
+        ))
+    }
+
+    func testMissingManagedSpaceFallsBackToTargetDisplayOnly() {
+        XCTAssertTrue(PickerSpaceWindowPolicy.includesWhenSpaceUnknown(
+            isInActiveSweep: true,
+            isMinimized: false,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: false,
+            windowDisplayID: 2,
+            targetDisplayID: 2
+        ))
+        XCTAssertFalse(PickerSpaceWindowPolicy.includesWhenSpaceUnknown(
+            isInActiveSweep: true,
+            isMinimized: false,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: false,
+            windowDisplayID: 1,
+            targetDisplayID: 2
+        ))
+        XCTAssertFalse(PickerSpaceWindowPolicy.includesWhenSpaceUnknown(
+            isInActiveSweep: false,
+            isMinimized: false,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: false,
+            windowDisplayID: 2,
+            targetDisplayID: 2
+        ))
+        XCTAssertTrue(PickerSpaceWindowPolicy.includesWhenSpaceUnknown(
+            isInActiveSweep: false,
+            isMinimized: true,
+            isHidden: false,
+            isConfirmedStageManagerOffstage: false,
+            windowDisplayID: nil,
+            targetDisplayID: 2
+        ))
+    }
+
+    func testFocusRelocationUsesInvocationDestinationSpace() {
+        XCTAssertFalse(WindowFocusSpacePolicy.shouldMove(
+            claimedSpaceIDs: [1279],
+            legacyIsCrossSpace: true,
+            resolvedDestinationSpaceID: 1279
+        ))
+        XCTAssertFalse(WindowFocusSpacePolicy.shouldMove(
+            claimedSpaceIDs: [1044],
+            legacyIsCrossSpace: false,
+            resolvedDestinationSpaceID: 1279
+        ))
+        XCTAssertTrue(WindowFocusSpacePolicy.shouldMove(
+            claimedSpaceIDs: [1044],
+            legacyIsCrossSpace: true,
+            resolvedDestinationSpaceID: 1279
+        ))
+        XCTAssertTrue(WindowFocusSpacePolicy.shouldMove(
+            claimedSpaceIDs: [1044],
+            legacyIsCrossSpace: true,
+            resolvedDestinationSpaceID: nil
+        ))
+        XCTAssertFalse(WindowFocusSpacePolicy.shouldMove(
+            claimedSpaceIDs: [],
+            legacyIsCrossSpace: true,
+            resolvedDestinationSpaceID: 1279
         ))
     }
 }

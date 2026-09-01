@@ -40,17 +40,7 @@ final class SwitchPreferences: ObservableObject {
         }
     }
 
-    enum PickerDisplay: String, CaseIterable, Identifiable {
-        case mouse, active, primary
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .mouse: return "Mouse"
-            case .active: return "Active"
-            case .primary: return "Primary"
-            }
-        }
-    }
+    typealias PickerDisplay = PickerDisplayChoice
 
     enum BackgroundBlur: String, CaseIterable, Identifiable {
         case light, medium, heavy

@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 
 enum WindowFocuser {
-    static func focus(_ window: WindowInfo) {
+    static func focus(_ window: WindowInfo, destinationSpaceID: Int? = nil) {
         if window.isWindowless {
             let app = NSRunningApplication(processIdentifier: window.pid)
             if app?.isHidden == true { app?.unhide() }
@@ -19,12 +19,18 @@ enum WindowFocuser {
         // windows own their Space and can't be moved into another one, and
         // moving a desktop window while standing on a fullscreen Space sucks
         // it INTO that Space. Any fullscreen involvement → go to the window.
-        if window.isCrossSpace && !window.isFullscreenSpace {
-            let cid = CGSMainConnectionID()
-            let currentSpace = CGSGetActiveSpace(cid)
-            if !isFullscreenSpace(currentSpace, cid: cid) {
+        let cid = CGSMainConnectionID()
+        let shouldMove = WindowFocusSpacePolicy.shouldMove(
+            claimedSpaceIDs: window.spaceIDs,
+            legacyIsCrossSpace: window.isCrossSpace,
+            resolvedDestinationSpaceID: destinationSpaceID
+        )
+        let requiresRemoteFocus = shouldMove || window.isCrossSpace || window.isStageManagerOffstage
+        if shouldMove && !window.isFullscreenSpace {
+            let destination = CGSSpaceID(destinationSpaceID ?? Int(CGSGetActiveSpace(cid)))
+            if !isFullscreenSpace(destination, cid: cid) {
                 let ids = [NSNumber(value: window.id)] as CFArray
-                CGSMoveWindowsToManagedSpace(cid, ids, currentSpace)
+                CGSMoveWindowsToManagedSpace(cid, ids, destination)
                 // Exempt from the current-space-claim prune: if the raise below
                 // fails, the moved window sits here off-screen with no AX element.
                 WindowEnumerator.noteSwitchMovedWindow(window.id)
@@ -38,7 +44,7 @@ enum WindowFocuser {
         // (Godot, #117) start coming forward before the raise calls below. The
         // late activate still runs; cross-Space skips this because the
         // focused-window write must steer activation first.
-        if !window.isCrossSpace { cooperativeActivate(app) }
+        if !requiresRemoteFocus { cooperativeActivate(app) }
 
         let appAX = AXUIElementCreateApplication(window.pid)
         let axWindows = AXHelpers.windowList(of: appAX)
@@ -52,7 +58,7 @@ enum WindowFocuser {
         }
         // No usable element (Chromium hiding off-Space windows + cold cache, or
         // a stale cached handle): let the app focus it via its own Window menu.
-        if !raised && window.isCrossSpace {
+        if !raised && requiresRemoteFocus {
             focusViaWindowMenu(window)
         }
 

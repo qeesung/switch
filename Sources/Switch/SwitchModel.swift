@@ -38,6 +38,9 @@ final class SwitchModel: ObservableObject {
     var commitAndDismiss: (() -> Void)?
     /// Set by AppDelegate so the model can request a dismiss when no windows remain after a close.
     var cancelAndDismiss: (() -> Void)?
+    /// Window enumeration can finish after the panel appears; resize against
+    /// the invocation's captured screen when the unfiltered list changes.
+    var contentDidChange: (() -> Void)?
 
     private var refreshTimer: Timer?
     private var prewarmTimer: Timer?
@@ -94,6 +97,11 @@ final class SwitchModel: ObservableObject {
         let final: [WindowInfo]
         if mode == .spaces {
             let active = pickerScreenResolution?.currentSpaceID
+                ?? pickerScreenResolution.flatMap { resolution in
+                    snapshot.windows.spaceRepresentatives.first(where: {
+                        $0.displayID == resolution.displayID && !$0.isCrossSpace
+                    })?.spaceID
+                }
                 ?? Int(CGSGetActiveSpace(CGSMainConnectionID()))
             final = snapshot.windows.spaceRepresentatives.map { rep in
                 var out = rep
@@ -105,7 +113,10 @@ final class SwitchModel: ObservableObject {
             final = buildWindowList(from: snapshot.windows)
         }
         let changed = final != windows
-        if changed { windows = final }
+        if changed {
+            windows = final
+            contentDidChange?()
+        }
 
         if initial {
             if mode == .spaces {
@@ -178,18 +189,42 @@ final class SwitchModel: ObservableObject {
             cross = cross.filter { $0.pid == f }
         }
         if !SwitchPreferences.shared.showCrossSpace || currentSpaceOnly {
-            if let targetSpaceID = pickerScreenResolution?.currentSpaceID {
+            if let pickerScreenResolution,
+               let targetSpaceID = pickerScreenResolution.currentSpaceID {
                 let belongsToPickerSpace: (WindowInfo) -> Bool = { window in
                     PickerSpaceWindowPolicy.includes(
                         claimedSpaceIDs: window.spaceIDs,
                         isMinimized: window.isMinimized,
                         isHidden: window.isHidden,
                         isConfirmedStageManagerOffstage: window.isStageManagerOffstage,
-                        targetSpaceID: targetSpaceID
+                        targetSpaceID: targetSpaceID,
+                        windowDisplayID: window.displayID,
+                        targetDisplayID: pickerScreenResolution.displayID
                     )
                 }
                 active = active.filter(belongsToPickerSpace)
                 cross = cross.filter(belongsToPickerSpace)
+            } else if let pickerScreenResolution {
+                active = active.filter { window in
+                    PickerSpaceWindowPolicy.includesWhenSpaceUnknown(
+                        isInActiveSweep: true,
+                        isMinimized: window.isMinimized,
+                        isHidden: window.isHidden,
+                        isConfirmedStageManagerOffstage: window.isStageManagerOffstage,
+                        windowDisplayID: window.displayID,
+                        targetDisplayID: pickerScreenResolution.displayID
+                    )
+                }
+                cross = cross.filter { window in
+                    PickerSpaceWindowPolicy.includesWhenSpaceUnknown(
+                        isInActiveSweep: false,
+                        isMinimized: window.isMinimized,
+                        isHidden: window.isHidden,
+                        isConfirmedStageManagerOffstage: window.isStageManagerOffstage,
+                        windowDisplayID: window.displayID,
+                        targetDisplayID: pickerScreenResolution.displayID
+                    )
+                }
             } else {
                 // Private display/Space metadata can be unavailable. Preserve
                 // the prior global-current-Space behavior as a safe fallback.
@@ -285,6 +320,7 @@ final class SwitchModel: ObservableObject {
         if selected >= remaining.count {
             selected = remaining.count - 1
         }
+        contentDidChange?()
     }
 
     private func startRefreshTimer() {
@@ -407,7 +443,10 @@ final class SwitchModel: ObservableObject {
     func commit() {
         let list = filteredWindows
         if list.indices.contains(selected) {
-            WindowFocuser.focus(list[selected])
+            WindowFocuser.focus(
+                list[selected],
+                destinationSpaceID: pickerScreenResolution?.currentSpaceID
+            )
             // Warm the cache once the Space transition settles so an immediate
             // re-invoke doesn't arm from a pre-switch snapshot (3s prewarm gap).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
