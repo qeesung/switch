@@ -173,7 +173,7 @@ enum KeyName {
     /// Human-readable key name (single char where possible, "Tab" / "F1" etc otherwise).
     static func string(for code: UInt16) -> String {
         if let s = special[code] { return s }
-        // Fall back to NSEvent.charactersByApplyingModifiers for printable keys.
+        // Fall back to the current Unicode keyboard layout for printable keys.
         if let cs = chars(for: code) { return cs.uppercased() }
         return String(localized: "Key \(Int(code))", comment: "Unknown key code fallback")
     }

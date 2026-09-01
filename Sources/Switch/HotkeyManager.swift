@@ -70,12 +70,6 @@ final class HotkeyManager {
     private static let kcRightArrow: CGKeyCode = 124
     private static let kcDownArrow: CGKeyCode = 125
     private static let kcUpArrow: CGKeyCode = 126
-    private static let kcW: CGKeyCode = 13
-    private static let kcQ: CGKeyCode = 12
-    private static let kcH: CGKeyCode = 4
-    private static let kcComma: CGKeyCode = 43
-    private static let kcDigits: [CGKeyCode] = [18, 19, 20, 21, 23, 22, 26, 28, 25]
-    private static let kcKeypadDigits: [CGKeyCode] = [83, 84, 85, 86, 87, 88, 89, 91, 92]
 
     func start() {
         if !ensureAccessibility() { return }
@@ -302,50 +296,23 @@ final class HotkeyManager {
                     }
                     return nil
                 }
-                if actionModifierMatches && kc == Self.kcW {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onCloseSelected?()
-                    }
-                    return nil
-                }
-                if actionModifierMatches && kc == Self.kcQ {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onCloseSelectedApp?()
-                    }
-                    return nil
-                }
-                if actionModifierMatches && kc == Self.kcH {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onHideSelected?()
-                    }
-                    return nil
-                }
-                if kc == Self.kcComma && (cmd || activeBinding?.modifiersHeld(flags) == true) {
-                    clearArmed()
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onCancel?()
-                        self?.onOpenSettings?()
-                    }
-                    return nil
-                }
                 if let direction = arrowDirection(for: kc) {
                     DispatchQueue.main.async { [weak self] in
                         self?.onNavigate?(direction)
                     }
                     return nil
                 }
-                if let index = digitIndex(for: kc) {
-                    let chain = cmd
-                    DispatchQueue.main.async { [weak self] in
-                        if chain { self?.onPickSelectOnly?(index) }
-                        else { self?.onPickIndex?(index) }
-                    }
-                    return nil
-                }
-                if typeToFilter, let c = filterChar(from: event) {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onFilterAppend?(c)
-                    }
+
+                let character = PickerKeyInterpreter.logicalCharacter(from: event)
+                let characterAction = PickerKeyInterpreter.action(
+                    logicalCharacter: character,
+                    keyCode: kc,
+                    actionModifierMatches: actionModifierMatches,
+                    settingsModifierMatches: cmd || activeBinding?.modifiersHeld(flags) == true,
+                    typeToFilter: typeToFilter
+                )
+                if let characterAction {
+                    handleCharacterAction(characterAction, chainSelection: cmd)
                     return nil
                 }
             }
@@ -471,18 +438,36 @@ final class HotkeyManager {
         }
     }
 
-    // NSEvent character APIs hit TSM, which asserts main-queue on macOS 26.2+ and traps this thread.
-    private func filterChar(from event: CGEvent) -> Character? {
-        guard let copy = event.copy() else { return nil }
-        copy.flags = copy.flags.intersection(.maskShift)
-        var length = 0
-        var buffer = [UniChar](repeating: 0, count: 4)
-        copy.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &buffer)
-        guard length > 0, let c = String(utf16CodeUnits: buffer, count: length).first else { return nil }
-        if c.isLetter || c == " " || c == "-" || c == "." {
-            return Character(c.lowercased())
+    private func handleCharacterAction(_ action: PickerKeyInterpreter.Action, chainSelection: Bool) {
+        switch action {
+        case .closeSelected:
+            DispatchQueue.main.async { [weak self] in
+                self?.onCloseSelected?()
+            }
+        case .closeSelectedApp:
+            DispatchQueue.main.async { [weak self] in
+                self?.onCloseSelectedApp?()
+            }
+        case .hideSelected:
+            DispatchQueue.main.async { [weak self] in
+                self?.onHideSelected?()
+            }
+        case .openSettings:
+            clearArmed()
+            DispatchQueue.main.async { [weak self] in
+                self?.onCancel?()
+                self?.onOpenSettings?()
+            }
+        case .pickIndex(let index):
+            DispatchQueue.main.async { [weak self] in
+                if chainSelection { self?.onPickSelectOnly?(index) }
+                else { self?.onPickIndex?(index) }
+            }
+        case .appendFilter(let character):
+            DispatchQueue.main.async { [weak self] in
+                self?.onFilterAppend?(character)
+            }
         }
-        return nil
     }
 
     private func arrowDirection(for kc: CGKeyCode) -> Direction? {
@@ -493,9 +478,5 @@ final class HotkeyManager {
         case Self.kcUpArrow:    return .up
         default:                return nil
         }
-    }
-
-    private func digitIndex(for kc: CGKeyCode) -> Int? {
-        Self.kcDigits.firstIndex(of: kc) ?? Self.kcKeypadDigits.firstIndex(of: kc)
     }
 }
