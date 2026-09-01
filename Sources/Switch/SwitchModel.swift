@@ -3,7 +3,9 @@ import SwiftUI
 
 @MainActor
 final class SwitchModel: ObservableObject {
-    @Published var windows: [WindowInfo] = []
+    @Published var windows: [WindowInfo] = [] {
+        didSet { searchIndex.synchronize(with: windows) }
+    }
     @Published var selected: Int = 0
     @Published var mode: HotkeyManager.Mode = .allWindows
     @Published var visible: Bool = false
@@ -27,37 +29,11 @@ final class SwitchModel: ObservableObject {
     private var armSelfHadKeyWindow = false
     private var quitPIDs: Set<pid_t> = []
     private var thumbnailTasks: [Task<Void, Never>] = []
+    private var searchIndex = WindowSearchIndex()
     var pointerWindowID: CGWindowID?
 
     var filteredWindows: [WindowInfo] {
-        let q = filterText.lowercased()
-        if q.isEmpty { return windows }
-        let scored: [(WindowInfo, Int)] = windows.compactMap { w in
-            let a = Self.fuzzyScore(pattern: q, target: w.appName.lowercased())
-            let t = Self.fuzzyScore(pattern: q, target: w.title.lowercased())
-            guard let s = [a, t].compactMap({ $0 }).max() else { return nil }
-            return (w, s)
-        }
-        return scored.sorted { $0.1 > $1.1 }.map { $0.0 }
-    }
-
-    private static func fuzzyScore(pattern: String, target: String) -> Int? {
-        let pat = Array(pattern)
-        let tgt = Array(target)
-        var score = 0
-        var patIdx = 0
-        var lastMatch = -1
-        for (i, c) in tgt.enumerated() {
-            guard patIdx < pat.count else { break }
-            if c == pat[patIdx] {
-                score += 1
-                if lastMatch == i - 1 { score += 5 }
-                if i == 0 || !tgt[i - 1].isLetter { score += 3 }
-                lastMatch = i
-                patIdx += 1
-            }
-        }
-        return patIdx == pat.count ? score : nil
+        searchIndex.filtered(windows, query: filterText)
     }
 
     func arm(_ style: HotkeyManager.ArmStyle) {
