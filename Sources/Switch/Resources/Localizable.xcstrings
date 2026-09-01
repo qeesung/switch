@@ -2837,6 +2837,261 @@
         }
       }
     },
+    "All windows on the current Space only, whatever the cross-Space setting.": {
+      "comment": "Current Space hotkey help",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All windows on the current Space only, whatever the cross-Space setting."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示当前空间中的所有窗口，不受跨空间设置影响。"
+          }
+        }
+      }
+    },
+    "Clear shortcut": {
+      "comment": "Clear a configured hotkey",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear shortcut"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除快捷键"
+          }
+        }
+      }
+    },
+    "Current Space": {
+      "comment": "Current Space hotkey group",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Space"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前空间"
+          }
+        }
+      }
+    },
+    "List width": {
+      "comment": "Picker sizing setting",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "List width"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表宽度"
+          }
+        }
+      }
+    },
+    "Mouse: the screen under the cursor. Active: the screen with the focused window. Primary: your main display.": {
+      "comment": "Picker display setting help",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mouse: the screen under the cursor. Active: the screen with the focused window. Primary: your main display."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鼠标：光标所在的显示器。活跃：焦点窗口所在的显示器。主显示器：您的主显示器。"
+          }
+        }
+      }
+    },
+    "Opens the picker in sticky mode, leaving your main hotkeys quick.": {
+      "comment": "Sticky picker hotkey help",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens the picker in sticky mode, leaving your main hotkeys quick."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以粘滞模式打开选择器，同时保留主快捷键的快速切换方式。"
+          }
+        }
+      }
+    },
+    "Picker display: Active": {
+      "comment": "Picker display segmented control",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "活跃"
+          }
+        }
+      }
+    },
+    "Picker display: Mouse": {
+      "comment": "Picker display segmented control",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mouse"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "鼠标"
+          }
+        }
+      }
+    },
+    "Picker display: Primary": {
+      "comment": "Picker display segmented control",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Primary"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "主显示器"
+          }
+        }
+      }
+    },
+    "Restore columns, list rows and width, thumbnail size, and app icon size.": {
+      "comment": "Reset picker sizing help",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore columns, list rows and width, thumbnail size, and app icon size."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复列数、列表行数与宽度、缩略图大小和应用图标大小。"
+          }
+        }
+      }
+    },
+    "Rows": {
+      "comment": "Picker sizing setting",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rows"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "行数"
+          }
+        }
+      }
+    },
+    "Rows visible at once in the list view. %lld": {
+      "comment": "Picker sizing row count",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rows visible at once in the list view. %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表视图一次显示的行数：%lld"
+          }
+        }
+      }
+    },
+    "Show picker on": {
+      "comment": "Picker display setting",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show picker on"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择器显示位置"
+          }
+        }
+      }
+    },
+    "Turns sticky mode on or off for the main hotkeys.": {
+      "comment": "Sticky toggle hotkey help",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turns sticky mode on or off for the main hotkeys."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "为主快捷键开启或关闭粘滞模式。"
+          }
+        }
+      }
+    },
+    "Width of the vertical list. %lldpt": {
+      "comment": "Picker list width in points",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Width of the vertical list. %lldpt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纵向列表宽度：%lldpt"
+          }
+        }
+      }
+    },
     "That combo is reserved by macOS or common apps.": {
       "comment": "Hotkey rejected: reserved combo",
       "localizations": {

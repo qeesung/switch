@@ -68,7 +68,7 @@ struct SwitchView: View {
     @ViewBuilder
     private func numberHint(index: Int) -> some View {
         if prefs.showNumberKeyHints && !isSpaceMode && index < 9 {
-            Text("\(index + 1)")
+            Text(verbatim: String(index + 1))
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
                 .frame(width: 16, height: 16)
@@ -411,7 +411,7 @@ struct SwitchView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if !window.title.isEmpty {
-                    Text("·")
+                    Text(verbatim: "·")
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
                     Text(titleFirst ? window.appName : window.title)

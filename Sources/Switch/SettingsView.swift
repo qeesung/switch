@@ -369,10 +369,12 @@ struct SettingsView: View {
                 Divider().opacity(0.4)
                 row(title: "Show picker on",
                     detail: "Mouse: the screen under the cursor. Active: the screen with the focused window. Primary: your main display.") {
-                    Picker("", selection: $prefs.pickerDisplay) {
+                    Picker(selection: $prefs.pickerDisplay) {
                         ForEach(SwitchPreferences.PickerDisplay.allCases) { d in
                             Text(d.label).tag(d)
                         }
+                    } label: {
+                        EmptyView()
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -618,10 +620,12 @@ struct SettingsView: View {
 
                 section("Background") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Picker("", selection: $prefs.backgroundBlur) {
+                        Picker(selection: $prefs.backgroundBlur) {
                             ForEach(SwitchPreferences.BackgroundBlur.allCases) { b in
                                 Text(b.label).tag(b)
                             }
+                        } label: {
+                            EmptyView()
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
@@ -694,7 +698,9 @@ struct SettingsView: View {
 
     private func toggleRow(_ title: LocalizedStringResource, _ detail: LocalizedStringResource, _ isOn: Binding<Bool>) -> some View {
         row(title: title, detail: detail) {
-            Toggle("", isOn: isOn)
+            Toggle(isOn: isOn) {
+                EmptyView()
+            }
                 .labelsHidden().toggleStyle(.switch)
                 .tint(prefs.accent.color)
         }
