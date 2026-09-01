@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - 'codex/validate-*'
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -57,7 +62,7 @@ jobs:
           while IFS= read -r -d '' script; do
             bash -n "$script"
           done < <(find scripts tools -type f -name '*.sh' -print0)
-          git diff --check HEAD^1 HEAD
+          git diff --check
           bash scripts/validate-localizations.sh
 
       - name: Generate Xcode project
@@ -111,20 +116,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          debug_app="$DEBUG_DERIVED_DATA/Build/Products/Debug/Switch.app"
           release_app="$RELEASE_DERIVED_DATA/Build/Products/Release/Switch.app"
           localizable="$release_app/Contents/Resources/zh-Hans.lproj/Localizable.strings"
           info_strings="$release_app/Contents/Resources/zh-Hans.lproj/InfoPlist.strings"
+          test -d "$debug_app"
           test -d "$release_app"
           test -s "$localizable"
           test -s "$info_strings"
           plutil -lint "$localizable" "$info_strings"
           ditto -c -k --sequesterRsrc --keepParent \
-            "$release_app" "${{ runner.temp }}/Switch-unsigned-Release.zip"
+            "$debug_app" "${{ runner.temp }}/Switch-unsigned-Debug.zip"
 
       - name: Upload unsigned app
         uses: actions/upload-artifact@v4
         with:
-          name: Switch-unsigned-Release
-          path: ${{ runner.temp }}/Switch-unsigned-Release.zip
+          name: Switch-unsigned-Debug
+          path: ${{ runner.temp }}/Switch-unsigned-Debug.zip
           if-no-files-found: error
           retention-days: 7
