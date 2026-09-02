@@ -2,6 +2,42 @@ import AppKit
 import ApplicationServices
 
 enum WindowFocuser {
+    /// Returns true only when the requested target, not merely its application,
+    /// owns keyboard focus. Same-process windows can live on different Spaces,
+    /// so checking the frontmost PID alone can replay input into the wrong one.
+    static func isFocused(_ window: WindowInfo) -> Bool {
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == window.pid else {
+            return false
+        }
+        if window.isWindowless { return true }
+
+        // `focus(_:)` writes kAXFocusedWindowAttribute before activating a
+        // remote Space. Reading that value back immediately only proves the AX
+        // request was accepted, not that WindowServer has completed the Space
+        // transition and can route keys there.
+        guard let descriptions = CGWindowListCopyWindowInfo(
+            [.optionIncludingWindow],
+            window.id
+        ) as? [[String: Any]],
+        let description = descriptions.first,
+        description[kCGWindowIsOnscreen as String] as? Bool == true else {
+            return false
+        }
+
+        let appAX = AXUIElementCreateApplication(window.pid)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appAX,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedRef
+        ) == .success,
+        let focusedRef,
+        CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else {
+            return false
+        }
+        return AXHelpers.windowID(of: focusedRef as! AXUIElement) == window.id
+    }
+
     static func focus(_ window: WindowInfo, destinationSpaceID: Int? = nil) {
         if window.isWindowless {
             let app = NSRunningApplication(processIdentifier: window.pid)

@@ -58,6 +58,7 @@ targets:
       - path: Sources/Switch/KeyboardLayoutTranslator.swift
       - path: Sources/Switch/PickerArmTransitionPolicy.swift
       - path: Sources/Switch/PickerKeyInterpreter.swift
+      - path: Sources/Switch/PickerInputRoutingPolicy.swift
       - path: Sources/Switch/PickerScreenSelectionPolicy.swift
       - path: Sources/Switch/PickerSessionReleasePolicy.swift
       - path: Sources/Switch/SwitchPreferenceRules.swift

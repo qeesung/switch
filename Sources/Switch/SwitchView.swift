@@ -147,10 +147,20 @@ struct SwitchView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if !model.filterText.isEmpty {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+            if prefs.typeToFilter {
+                PickerSearchField(
+                    text: model.filterText,
+                    onTextChange: { model.replaceFilter($0) },
+                    onFocusChange: { model.setSearchFieldFocused($1, for: $0) },
+                    onRegister: { model.registerSearchField($0) },
+                    onUnregister: { model.unregisterSearchField($0) },
+                    onCommit: { model.commitAndDismiss?() },
+                    onCancel: { model.cancelAndDismiss?() },
+                    onNavigate: { model.navigate(direction: $0) }
+                )
+                .frame(minWidth: 140, maxWidth: 320, minHeight: 22, maxHeight: 22)
+                .layoutPriority(1)
+            } else if !model.filterText.isEmpty {
                 Text(model.filterText)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary)

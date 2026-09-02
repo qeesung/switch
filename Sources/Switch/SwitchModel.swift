@@ -10,13 +10,16 @@ final class SwitchModel: ObservableObject {
     @Published var mode: HotkeyManager.Mode = .allWindows
     @Published var visible: Bool = false
     @Published var thumbnails: [CGWindowID: NSImage] = [:]
-    @Published var filterText: String = ""
+    @Published private(set) var filterText: String = ""
     @Published var panelSize = CGSize(width: 880, height: 560)
     /// Effective sticky for this invocation: global pref or a dedicated sticky binding (#131).
     @Published var stickySession = false
-    /// Once typing reveals a hidden header, keep it for the invocation. Letting the
-    /// header appear and disappear while backspacing would repeatedly resize the panel.
+    /// Once filtering is available, keep its header mounted for the invocation.
+    /// Removing an empty native field would also discard its cursor and selection.
     @Published private(set) var filterHeaderVisible = false
+    @Published private(set) var searchFieldFocused = false
+    private(set) weak var registeredSearchField: NSSearchField?
+    var searchFieldDidRegister: ((NSSearchField) -> Void)?
     private var currentSpaceOnly = false
     private var armReverse = false
     private(set) var pickerScreenResolution: PickerScreenResolution?
@@ -50,6 +53,7 @@ final class SwitchModel: ObservableObject {
     private var quitPIDs: Set<pid_t> = []
     private var thumbnailTasks: [Task<Void, Never>] = []
     private var searchIndex = WindowSearchIndex()
+    private var replaceFilterOnNextInput = false
     var pointerWindowID: CGWindowID?
 
     var filteredWindows: [WindowInfo] {
@@ -65,14 +69,19 @@ final class SwitchModel: ObservableObject {
         self.mode = style.mode
         self.pickerScreenResolution = pickerScreenResolution
         stickySession = style.sticky
-        filterHeaderVisible = false
+        filterHeaderVisible = SwitchPreferences.shared.typeToFilter
+        // A new identity resets the query even if it reuses the same field
+        // editor. Keep raw events out until SwitcherWindow has synchronized that
+        // editor to the new empty value and explicitly republishes focus.
+        searchFieldFocused = false
         currentSpaceOnly = style.currentSpaceOnly
         armReverse = style.reverse
         quitPIDs.removeAll()
         filterText = ""
+        replaceFilterOnNextInput = false
         pointerWindowID = nil
         armFrontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        armSelfHadKeyWindow = NSApp.keyWindow != nil
+        armSelfHadKeyWindow = NSApp.keyWindow.map { !($0 is SwitcherWindow) } ?? false
         if let snap = WindowStore.shared.current {
             apply(snapshot: snap, initial: true)
         } else {
@@ -129,8 +138,8 @@ final class SwitchModel: ObservableObject {
             } else {
                 // Own windows aren't listed, so with Switch frontmost index 0 is already the previous window.
                 // Only treat Switch as frontmost when it genuinely owns a visible key window (Settings/About/
-                // onboarding); the picker panel can't become key, so keyWindow != nil rules out the stale
-                // "still frontmost after closing a window" state behind #90.
+                // onboarding). The picker may temporarily be key for native search editing,
+                // so explicitly exclude it when detecting a real Switch-owned window (#90).
                 let selfFront = armFrontmostPID == ProcessInfo.processInfo.processIdentifier && armSelfHadKeyWindow
                 let n = filteredWindows.count
                 selected = (stickySession || selfFront) ? 0
@@ -428,21 +437,104 @@ final class SwitchModel: ObservableObject {
         cancelAndDismiss?()
     }
 
-    func appendFilter(_ char: Character) {
+    func replaceFilter(_ text: String) {
         filterHeaderVisible = true
-        filterText.append(char)
+        replaceFilterOnNextInput = false
+        guard filterText != text else { return }
+        filterText = text
         selected = 0
+    }
+
+    func appendFilter(_ char: Character) {
+        if replaceFilterOnNextInput {
+            replaceFilterOnNextInput = false
+            replaceFilterFromTap(String(char))
+            return
+        }
+        replaceFilterFromTap(filterText + String(char))
     }
 
     func backspaceFilter() {
+        if replaceFilterOnNextInput {
+            replaceFilterOnNextInput = false
+            replaceFilterFromTap("")
+            return
+        }
         guard !filterText.isEmpty else { return }
-        filterText.removeLast()
-        selected = 0
+        var updated = filterText
+        updated.removeLast()
+        replaceFilterFromTap(updated)
     }
 
-    func commit() {
+    func setSearchFieldFocused(_ focused: Bool) {
+        searchFieldFocused = focused
+    }
+
+    func selectAllFilter() {
+        replaceFilterOnNextInput = true
+    }
+
+    var hasPendingFilterSelectAll: Bool { replaceFilterOnNextInput }
+
+    func insertFilterTextFromTap(_ text: String) {
+        guard !text.isEmpty else { return }
+        if replaceFilterOnNextInput {
+            replaceFilterOnNextInput = false
+            replaceFilterFromTap(text)
+        } else {
+            replaceFilterFromTap(filterText + text)
+        }
+    }
+
+    func selectedFilterTextForTap(cut: Bool) -> String? {
+        guard replaceFilterOnNextInput else { return nil }
+        let selectedText = filterText
+        if cut {
+            replaceFilterOnNextInput = false
+            replaceFilterFromTap("")
+        }
+        return selectedText
+    }
+
+    /// Tap-routed text can already be queued when the native field becomes first
+    /// responder. Update the editor immediately and collapse its selection so a
+    /// delayed Cmd+A focus request cannot select this replacement a second time.
+    private func replaceFilterFromTap(_ text: String) {
+        replaceFilter(text)
+        guard let field = registeredSearchField else { return }
+        field.stringValue = text
+        if let editor = field.currentEditor() as? NSTextView {
+            editor.string = text
+            editor.setSelectedRange(NSRange(
+                location: (text as NSString).length,
+                length: 0
+            ))
+        }
+    }
+
+    func setSearchFieldFocused(_ focused: Bool, for field: NSSearchField) {
+        guard registeredSearchField === field else { return }
+        searchFieldFocused = focused
+    }
+
+    func registerSearchField(_ field: NSSearchField) {
+        guard registeredSearchField !== field else { return }
+        registeredSearchField = field
+        searchFieldDidRegister?(field)
+    }
+
+    func unregisterSearchField(_ field: NSSearchField) {
+        guard registeredSearchField === field else { return }
+        registeredSearchField = nil
+        searchFieldFocused = false
+    }
+
+    @discardableResult
+    func commit() -> WindowInfo? {
         let list = filteredWindows
+        var focusedWindow: WindowInfo?
         if list.indices.contains(selected) {
+            focusedWindow = list[selected]
             WindowFocuser.focus(
                 list[selected],
                 destinationSpaceID: pickerScreenResolution?.currentSpaceID
@@ -454,6 +546,7 @@ final class SwitchModel: ObservableObject {
             }
         }
         teardown()
+        return focusedWindow
     }
 
     func cancel() {
@@ -465,7 +558,9 @@ final class SwitchModel: ObservableObject {
         windows = []
         thumbnails = [:]
         filterHeaderVisible = false
+        searchFieldFocused = false
         filterText = ""
+        replaceFilterOnNextInput = false
         pickerScreenResolution = nil
         stopRefreshTimer()
         thumbnailTasks.forEach { $0.cancel() }
