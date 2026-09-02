@@ -125,6 +125,12 @@ struct PickerSearchField: NSViewRepresentable {
                 case 36, 76:
                     commit(from: control as? NSSearchField, textView: textView)
                     return true
+                case 123:
+                    navigate(.left, from: control as? NSSearchField, textView: textView)
+                    return true
+                case 124:
+                    navigate(.right, from: control as? NSSearchField, textView: textView)
+                    return true
                 case 125:
                     navigate(.down, from: control as? NSSearchField, textView: textView)
                     return true
@@ -148,6 +154,12 @@ struct PickerSearchField: NSViewRepresentable {
                 return true
             case "moveDown:", "moveDownAndModifySelection:":
                 navigate(.down, from: control as? NSSearchField, textView: textView)
+                return true
+            case "moveLeft:", "moveLeftAndModifySelection:":
+                navigate(.left, from: control as? NSSearchField, textView: textView)
+                return true
+            case "moveRight:", "moveRightAndModifySelection:":
+                navigate(.right, from: control as? NSSearchField, textView: textView)
                 return true
             default:
                 return false
@@ -210,6 +222,10 @@ private final class NativeSearchField: NSSearchField {
             onCancel?()
         case 36, 76:
             onCommit?()
+        case 123:
+            onNavigate?(.left)
+        case 124:
+            onNavigate?(.right)
         case 125:
             onNavigate?(.down)
         case 126:
