@@ -1,6 +1,81 @@
 import XCTest
 
 final class SwitchPreferenceRulesTests: XCTestCase {
+    func testPickerSizeKeepsValidStoredChoice() {
+        XCTAssertEqual(
+            SwitchPreferenceRules.resolvedPickerSizeRawValue(
+                storedRawValue: "compact",
+                legacyThumbnailHeight: nil,
+                legacyAppIconSize: nil
+            ),
+            "compact"
+        )
+    }
+
+    func testPickerSizeDefaultsToLargeWithoutExplicitLegacySizing() {
+        XCTAssertEqual(
+            SwitchPreferenceRules.resolvedPickerSizeRawValue(
+                storedRawValue: nil,
+                legacyThumbnailHeight: nil,
+                legacyAppIconSize: nil
+            ),
+            "large"
+        )
+    }
+
+    func testPickerSizeMigratesExplicitLegacySizingAtStandardScale() {
+        XCTAssertEqual(
+            SwitchPreferenceRules.resolvedPickerSizeRawValue(
+                storedRawValue: nil,
+                legacyThumbnailHeight: 180,
+                legacyAppIconSize: nil
+            ),
+            "standard"
+        )
+        XCTAssertEqual(
+            SwitchPreferenceRules.resolvedPickerSizeRawValue(
+                storedRawValue: "invalid",
+                legacyThumbnailHeight: nil,
+                legacyAppIconSize: 40
+            ),
+            "standard"
+        )
+    }
+
+    func testLegacyThumbnailValuesRetainTheirExactGridScaleAtMigration() {
+        for thumbnailHeight in [80.0, 130.0, 180.0, 300.0] {
+            XCTAssertEqual(
+                SwitchPreferenceRules.gridScale(
+                    pickerScale: SwitchPreferenceRules.standardPickerScale,
+                    thumbnailHeight: thumbnailHeight
+                ),
+                thumbnailHeight / 130,
+                accuracy: 0.000_001
+            )
+        }
+    }
+
+    func testGridScaleCombinesVisualPresetAndAdvancedThumbnailSize() {
+        XCTAssertEqual(
+            SwitchPreferenceRules.gridScale(pickerScale: 1.2, thumbnailHeight: 130),
+            1.2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            SwitchPreferenceRules.gridScale(pickerScale: 1.2, thumbnailHeight: 180),
+            1.2 * 180 / 130,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testGridScaleRejectsInvalidPersistedNumbers() {
+        XCTAssertEqual(
+            SwitchPreferenceRules.gridScale(pickerScale: .nan, thumbnailHeight: .infinity),
+            1,
+            accuracy: 0.000_001
+        )
+    }
+
     func testMaxListRowsClampsToSupportedRange() {
         XCTAssertEqual(SwitchPreferenceRules.clampedMaxListRows(-1), 4)
         XCTAssertEqual(SwitchPreferenceRules.clampedMaxListRows(12), 12)

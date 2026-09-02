@@ -9,6 +9,10 @@ struct SwitchView: View {
     @State private var hasMouseMovedSinceOpen = false
     @State private var lastSelectionFromMouse = false
 
+    private var visualScale: CGFloat { prefs.pickerSize.scale }
+    private func scaled(_ value: CGFloat) -> CGFloat { value * visualScale }
+    private var scaledAppIconSize: CGFloat { CGFloat(prefs.appIconSize) * visualScale }
+
     private func handleHover(_ isHovering: Bool, windowID: CGWindowID, index: Int) {
         guard !prefs.disableMouse else { return }
         if isHovering {
@@ -56,11 +60,11 @@ struct SwitchView: View {
 
     private func capsuleBadge(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .semibold))
-            .tracking(0.5)
+            .font(.system(size: scaled(9), weight: .semibold))
+            .tracking(scaled(0.5))
             .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, scaled(6))
+            .padding(.vertical, scaled(3))
             .background(Color.black.opacity(0.55))
             .clipShape(Capsule())
     }
@@ -70,11 +74,11 @@ struct SwitchView: View {
         if prefs.showNumberKeyHints && !isSpaceMode
             && !(model.stickySession && prefs.typeToFilter) && index < 9 {
             Text(verbatim: String(index + 1))
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: scaled(10), weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
-                .frame(width: 16, height: 16)
+                .frame(width: scaled(16), height: scaled(16))
                 .background(Color.black.opacity(0.55))
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: scaled(4), style: .continuous))
         }
     }
 
@@ -176,10 +180,11 @@ struct SwitchView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: scaled(10)) {
             if prefs.typeToFilter {
                 PickerSearchField(
                     text: model.filterText,
+                    visualScale: visualScale,
                     onTextChange: { model.replaceFilter($0) },
                     onFocusChange: { model.setSearchFieldFocused($1, for: $0) },
                     onRegister: { model.registerSearchField($0) },
@@ -188,34 +193,17 @@ struct SwitchView: View {
                     onCancel: { model.cancelAndDismiss?() },
                     onNavigate: { model.navigate(direction: $0) }
                 )
-                .frame(minWidth: 170, idealWidth: 260, maxWidth: 360, minHeight: 24, maxHeight: 24)
-                .padding(.horizontal, 5)
-                .frame(height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(model.searchFieldFocused ? 0.28 : 0.20))
+                .frame(
+                    minWidth: scaled(220),
+                    idealWidth: scaled(360),
+                    maxWidth: scaled(480),
+                    minHeight: scaled(34),
+                    maxHeight: scaled(34)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(
-                            model.searchFieldFocused
-                                ? prefs.accent.color.opacity(0.88)
-                                : Color.white.opacity(0.13),
-                            lineWidth: model.searchFieldFocused ? 1.25 : 1
-                        )
-                )
-                .shadow(
-                    color: model.searchFieldFocused
-                        ? prefs.accent.color.opacity(0.14)
-                        : Color.black.opacity(0.12),
-                    radius: model.searchFieldFocused ? 5 : 2,
-                    y: 1
-                )
-                .animation(.easeOut(duration: 0.14), value: model.searchFieldFocused)
                 .layoutPriority(1)
             } else if !model.filterText.isEmpty {
                 Text(model.filterText)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(.system(size: scaled(14), weight: .semibold, design: .monospaced))
                     .foregroundStyle(.primary)
             }
             Spacer()
@@ -227,14 +215,14 @@ struct SwitchView: View {
                         Text(verbatim: "\(model.filteredWindows.count)")
                     }
                 }
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: scaled(12), weight: .semibold))
+                .foregroundStyle(.secondary)
                 .monospacedDigit()
             }
         }
-        .padding(.horizontal, 22)
-        .frame(height: 30)
-        .padding(.top, 10)
+        .padding(.horizontal, scaled(22))
+        .frame(height: scaled(34))
+        .padding(.top, scaled(12))
         .measureHeight(into: \.headerHeight)
     }
 
@@ -247,25 +235,36 @@ struct SwitchView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         if isSpaceMode || prefs.verticalList {
-                            LazyVStack(spacing: 4) {
+                            LazyVStack(spacing: scaled(4)) {
                                 ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
                                     listRow(result: result, index: idx)
                                         .measureHeight(into: \.rowHeight)
                                         .id(result.id)
                                 }
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.top, showHeader ? 10 : 14)
+                            .padding(.horizontal, scaled(14))
+                            .padding(.top, scaled(showHeader ? 10 : 14))
                         } else {
-                            LazyVGrid(columns: gridColumns, spacing: 14) {
+                            let adaptiveGrid = adaptiveGridGeometry(itemCount: results.count)
+                            LazyVGrid(
+                                columns: Array(
+                                    repeating: GridItem(.flexible(), spacing: scaled(14)),
+                                    count: adaptiveGrid.columns
+                                ),
+                                spacing: scaled(14)
+                            ) {
                                 ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
-                                    tile(result: result, index: idx)
+                                    tile(
+                                        result: result,
+                                        index: idx,
+                                        thumbnailHeight: adaptiveGrid.thumbnailHeight
+                                    )
                                         .measureHeight(into: \.tileHeight)
                                         .id(result.id)
                                 }
                             }
-                            .padding(.horizontal, 22)
-                            .padding(.top, 4)
+                            .padding(.horizontal, scaled(22))
+                            .padding(.top, scaled(6))
                         }
                     }
                     .onChange(of: model.selected) { _, new in
@@ -283,7 +282,7 @@ struct SwitchView: View {
                     }
                     // Viewport chrome, not scroll content: no row can occupy this space
                     // and appear as a clipped sliver at the bottom.
-                    .padding(.bottom, isSpaceMode || prefs.verticalList ? 10 : 12)
+                    .padding(.bottom, scaled(isSpaceMode || prefs.verticalList ? 10 : 12))
                 }
             }
         }
@@ -291,17 +290,17 @@ struct SwitchView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: scaled(8)) {
             Image(systemName: model.filterText.isEmpty ? "rectangle.stack" : "magnifyingglass")
-                .font(.system(size: 20, weight: .medium))
+                .font(.system(size: scaled(22), weight: .medium))
                 .foregroundStyle(.tertiary)
             if model.filterText.isEmpty {
                 Text("No windows", comment: "Empty picker")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: scaled(13), weight: .semibold))
                     .foregroundStyle(.secondary)
             } else {
                 Text("No matches", comment: "Empty picker after filter")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: scaled(13), weight: .semibold))
                     .foregroundStyle(.secondary)
             }
         }
@@ -309,7 +308,7 @@ struct SwitchView: View {
     }
 
     private var hintStrip: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: scaled(18)) {
             hint("↵", isSpaceMode ? "switch space" : "switch")
             hint(navKey, "navigate")
             if prefs.shiftTapReverses { hint("⇧", "reverse") }
@@ -318,8 +317,8 @@ struct SwitchView: View {
             hint("esc", "cancel")
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 8)
+        .padding(.horizontal, scaled(22))
+        .padding(.vertical, scaled(8))
         .background(Color.black.opacity(0.18))
         .measureHeight(into: \.hintHeight)
     }
@@ -333,7 +332,7 @@ struct SwitchView: View {
     }
 
     private func stoplights(for window: WindowInfo) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: scaled(4)) {
             stoplight(color: Color(red: 1.0, green: 0.36, blue: 0.34), symbol: "xmark") {
                 model.close(window)
             }
@@ -357,9 +356,9 @@ struct SwitchView: View {
             else { prefs.pinnedBundleIDs.insert(bid) }
         } label: {
             Image(systemName: isPinned ? "pin.fill" : "pin")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: scaled(11), weight: .semibold))
                 .foregroundStyle(isPinned ? prefs.accent.color : Color.white.opacity(0.75))
-                .frame(width: 18, height: 18)
+                .frame(width: scaled(18), height: scaled(18))
                 .background(Circle().fill(Color.black.opacity(0.35)))
         }
         .buttonStyle(.plain)
@@ -372,10 +371,10 @@ struct SwitchView: View {
             ZStack {
                 Circle()
                     .fill(color)
-                    .frame(width: 12, height: 12)
-                    .shadow(color: .black.opacity(0.35), radius: 1, y: 0.5)
+                    .frame(width: scaled(12), height: scaled(12))
+                    .shadow(color: .black.opacity(0.35), radius: scaled(1), y: scaled(0.5))
                 Image(systemName: symbol)
-                    .font(.system(size: 7, weight: .bold))
+                    .font(.system(size: scaled(7), weight: .bold))
                     .foregroundStyle(.black.opacity(0.55))
             }
         }
@@ -383,36 +382,53 @@ struct SwitchView: View {
     }
 
     private func hint(_ key: String, _ label: LocalizedStringResource) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: scaled(5)) {
             Text(verbatim: key)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .tracking(1)
+                .font(.system(size: scaled(10), weight: .semibold, design: .monospaced))
+                .tracking(scaled(1))
                 .foregroundStyle(.primary.opacity(0.85))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
+                .padding(.horizontal, scaled(5))
+                .padding(.vertical, scaled(1))
                 .background(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    RoundedRectangle(cornerRadius: scaled(3), style: .continuous)
                         .fill(Color.white.opacity(0.10))
                 )
             Text(label)
-                .font(.system(size: 11))
+                .font(.system(size: scaled(11)))
                 .foregroundStyle(.secondary)
         }
         .fixedSize()
         .help(label)
     }
 
-    private var gridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 14), count: prefs.gridColumns)
+    private func adaptiveGridGeometry(itemCount: Int) -> SwitcherAdaptiveGridGeometry {
+        let headerHeight = showHeader ? scaled(46) : 0
+        let hintHeight = prefs.showHintStrip ? scaled(38) : 0
+        let gridChrome = scaled(16 + 52)
+        let verticalCapacity = model.panelSize.height - headerHeight - hintHeight - gridChrome
+        return SwitcherPanelLayout.adaptiveGrid(
+            panelWidth: model.panelSize.width,
+            itemCount: itemCount,
+            configuredColumns: prefs.gridColumns,
+            baseThumbnailHeight: CGFloat(prefs.thumbnailHeight) * visualScale,
+            compactThumbnailHeight: CGFloat(SwitchPreferences.compactThumbnailHeight) * visualScale,
+            showsThumbnails: prefs.showThumbnails,
+            visualScale: visualScale,
+            verticalCapacity: verticalCapacity
+        )
     }
 
-    private func tile(result: WindowSearchIndex.Result, index: Int) -> some View {
+    private func tile(
+        result: WindowSearchIndex.Result,
+        index: Int,
+        thumbnailHeight: CGFloat
+    ) -> some View {
         let window = result.window
         let selected = index == model.selected
         let hovered = hoveredID == window.id
         let icon = appIcon(for: window)
 
-        return VStack(alignment: .leading, spacing: 7) {
+        return VStack(alignment: .leading, spacing: scaled(7)) {
             ZStack(alignment: .bottomLeading) {
                 ZStack {
                     Color.black.opacity(0.22)
@@ -420,30 +436,30 @@ struct SwitchView: View {
                         Image(nsImage: img)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .padding(6)
+                            .padding(scaled(6))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
                     } else if let icon {
                         Image(nsImage: icon)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 56, height: 56)
+                            .frame(width: scaled(56), height: scaled(56))
                             .opacity(0.55)
                             .scaleEffect(selected ? 1.05 : 1.0)
                             .animation(switcherAnimation(.spring(response: 0.20, dampingFraction: 0.82)), value: selected)
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: prefs.showThumbnails ? prefs.thumbnailHeight : SwitchPreferences.compactThumbnailHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .frame(height: thumbnailHeight)
+                .clipShape(RoundedRectangle(cornerRadius: scaled(7), style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if prefs.showStoplights && !window.isWindowless {
-                        stoplights(for: window).padding(7)
+                        stoplights(for: window).padding(scaled(7))
                     }
                 }
                 .overlay(alignment: .topTrailing) {
                     if !window.isWindowless && (isPinned(window) || hovered) {
-                        pinButton(for: window).padding(7)
+                        pinButton(for: window).padding(scaled(7))
                     }
                 }
                 .animation(switcherAnimation(.easeOut(duration: 0.18)), value: model.thumbnails[window.id] != nil)
@@ -451,10 +467,10 @@ struct SwitchView: View {
                 if let icon {
                     Image(nsImage: icon)
                         .resizable()
-                        .frame(width: prefs.appIconSize, height: prefs.appIconSize)
+                        .frame(width: scaledAppIconSize, height: scaledAppIconSize)
                         .scaleEffect(selected ? 1.06 : 1.0)
-                        .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 1)
-                        .padding(7)
+                        .shadow(color: .black.opacity(0.35), radius: scaled(4), x: 0, y: scaled(1))
+                        .padding(scaled(7))
                         .animation(switcherAnimation(.spring(response: 0.20, dampingFraction: 0.82)), value: selected)
                 }
 
@@ -462,41 +478,42 @@ struct SwitchView: View {
                     Spacer()
                     VStack {
                         Spacer()
-                        windowBadge(for: window).padding(7)
+                        windowBadge(for: window).padding(scaled(7))
                     }
                 }
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: scaled(6)) {
                 let titleFirst = prefs.showTitleFirst && !window.title.isEmpty
                 numberHint(index: index)
                 highlightedSearchText(
                     titleFirst ? window.title : window.appName,
                     match: titleFirst ? result.titleMatch : result.appNameMatch,
-                    size: 12,
-                    weight: .medium,
+                    size: scaled(13),
+                    weight: .semibold,
                     baseColor: .primary
                 )
                     .lineLimit(1)
                 if !window.title.isEmpty {
                     Text(verbatim: "·")
-                        .font(.system(size: 12))
+                        .font(.system(size: scaled(12), weight: .medium))
                         .foregroundStyle(.tertiary)
                     highlightedSearchText(
                         titleFirst ? window.appName : window.title,
                         match: titleFirst ? result.appNameMatch : result.titleMatch,
-                        size: 12,
-                        weight: .regular,
+                        size: scaled(12),
+                        weight: .medium,
                         baseColor: .secondary
                     )
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 2)
+            .padding(.horizontal, scaled(2))
         }
-        .padding(9)
-        .modifier(SelectionChrome(selected: selected, hovered: hovered, cornerRadius: 9, accent: prefs.accent.color, namespace: selectionNS, selectedValue: model.selected, animationsEnabled: animationsEnabled))
+        .padding(scaled(9))
+        .modifier(SelectionChrome(selected: selected, hovered: hovered, cornerRadius: scaled(9), accent: prefs.accent.color, namespace: selectionNS, selectedValue: model.selected, animationsEnabled: animationsEnabled))
+        .animation(switcherAnimation(.easeInOut(duration: 0.18)), value: thumbnailHeight)
         .contentShape(Rectangle())
         .onHover { handleHover($0, windowID: window.id, index: index) }
         .onTapGesture { handleTap(index: index) }
@@ -508,26 +525,26 @@ struct SwitchView: View {
         let hovered = hoveredID == window.id
         let icon = appIcon(for: window)
 
-        return HStack(spacing: 11) {
+        return HStack(spacing: scaled(11)) {
             numberHint(index: index)
             ZStack {
                 if let icon {
                     Image(nsImage: icon)
                         .resizable()
-                        .frame(width: prefs.appIconSize, height: prefs.appIconSize)
+                        .frame(width: scaledAppIconSize, height: scaledAppIconSize)
                         .scaleEffect(selected ? 1.08 : 1.0)
                         .animation(switcherAnimation(.spring(response: 0.20, dampingFraction: 0.82)), value: selected)
                 } else {
-                    Color.clear.frame(width: prefs.appIconSize, height: prefs.appIconSize)
+                    Color.clear.frame(width: scaledAppIconSize, height: scaledAppIconSize)
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: scaled(2)) {
                 let titleFirst = prefs.showTitleFirst && !window.title.isEmpty
                 highlightedSearchText(
                     titleFirst ? window.title : window.appName,
                     match: titleFirst ? result.titleMatch : result.appNameMatch,
-                    size: 13,
-                    weight: .medium,
+                    size: scaled(14),
+                    weight: .semibold,
                     baseColor: .primary
                 )
                     .lineLimit(1)
@@ -535,14 +552,14 @@ struct SwitchView: View {
                     highlightedSearchText(
                         titleFirst ? window.appName : window.title,
                         match: titleFirst ? result.appNameMatch : result.titleMatch,
-                        size: 11,
-                        weight: .regular,
+                        size: scaled(12),
+                        weight: .medium,
                         baseColor: .secondary
                     )
                         .lineLimit(1)
                 }
             }
-            Spacer(minLength: 6)
+            Spacer(minLength: scaled(6))
             if !isSpaceMode && prefs.showStoplights && prefs.verticalShowStoplights && !window.isWindowless {
                 stoplights(for: window)
                     .opacity(hovered ? 1 : 0.45)
@@ -564,19 +581,19 @@ struct SwitchView: View {
                         Image(nsImage: img)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 88, height: 50)
+                            .frame(width: scaled(88), height: scaled(50))
                     } else {
                         Color.black.opacity(0.22)
-                            .frame(width: 88, height: 50)
+                            .frame(width: scaled(88), height: scaled(50))
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: scaled(5), style: .continuous))
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, scaled(10))
+        .padding(.vertical, scaled(6))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .modifier(SelectionChrome(selected: selected, hovered: hovered, cornerRadius: 8, accent: prefs.accent.color, namespace: selectionNS, selectedValue: model.selected, animationsEnabled: animationsEnabled))
+        .modifier(SelectionChrome(selected: selected, hovered: hovered, cornerRadius: scaled(8), accent: prefs.accent.color, namespace: selectionNS, selectedValue: model.selected, animationsEnabled: animationsEnabled))
         .contentShape(Rectangle())
         .onHover { handleHover($0, windowID: window.id, index: index) }
         .onTapGesture { handleTap(index: index) }

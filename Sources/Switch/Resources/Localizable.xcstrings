@@ -3024,6 +3024,210 @@
         }
       }
     },
+    "Compact": {
+      "comment": "Picker size preset",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compact"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "紧凑"
+          }
+        }
+      }
+    },
+    "Standard": {
+      "comment": "Picker size preset",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标准"
+          }
+        }
+      }
+    },
+    "Large": {
+      "comment": "Picker size preset",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "宽大"
+          }
+        }
+      }
+    },
+    "Picker size": {
+      "comment": "Picker sizing setting",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Picker size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择器大小"
+          }
+        }
+      }
+    },
+    "Scale the picker, text, search field, previews, icons, and spacing together.": {
+      "comment": "Picker size setting detail",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scale the picker, text, search field, previews, icons, and spacing together."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步缩放选择器、文字、搜索框、预览、图标和间距。"
+          }
+        }
+      }
+    },
+    "Advanced sizing": {
+      "comment": "Picker sizing disclosure",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced sizing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高级尺寸设置"
+          }
+        }
+      }
+    },
+    "Fine-tune the grid, list, previews, and app icons.": {
+      "comment": "Picker sizing disclosure detail",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fine-tune the grid, list, previews, and app icons."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "微调网格、列表、预览和应用图标。"
+          }
+        }
+      }
+    },
+    "Maximum columns in the grid. Fewer candidates use fewer, larger columns. %lld": {
+      "comment": "Picker maximum grid columns with count",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum columns in the grid. Fewer candidates use fewer, larger columns. %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网格最多显示的列数。候选较少时会使用更少、更大的列。%lld"
+          }
+        }
+      }
+    },
+    "Base width of the vertical list. %lldpt": {
+      "comment": "Picker base list width",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base width of the vertical list. %lldpt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纵向列表的基础宽度。%lldpt"
+          }
+        }
+      }
+    },
+    "Base preview height and grid frame before automatic enlargement. %lldpt": {
+      "comment": "Picker base preview height",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base preview height and grid frame before automatic enlargement. %lldpt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动放大前的基础预览高度和网格窗口大小。%lldpt"
+          }
+        }
+      }
+    },
+    "Base app icon size before overall scaling. %lldpt": {
+      "comment": "Picker base app icon size",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base app icon size before overall scaling. %lldpt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整体缩放前的基础应用图标大小。%lldpt"
+          }
+        }
+      }
+    },
+    "Restore the large preset and all advanced sizing defaults.": {
+      "comment": "Reset picker sizing help",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore the large preset and all advanced sizing defaults."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复宽大档和所有高级尺寸默认值。"
+          }
+        }
+      }
+    },
     "That combo is reserved by macOS or common apps.": {
       "comment": "Hotkey rejected: reserved combo",
       "localizations": {

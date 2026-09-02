@@ -395,7 +395,12 @@ final class SwitchModel: ObservableObject {
         let list = filteredWindows
         guard !list.isEmpty else { return }
         let n = list.count
-        let cols = (SwitchPreferences.shared.verticalList || mode == .spaces) ? 1 : SwitchPreferences.shared.gridColumns
+        let cols = (SwitchPreferences.shared.verticalList || mode == .spaces)
+            ? 1
+            : SwitcherPanelLayout.effectiveGridColumns(
+                itemCount: n,
+                configuredColumns: SwitchPreferences.shared.gridColumns
+            )
         let delta: Int
         switch direction {
         case .left:  delta = -1

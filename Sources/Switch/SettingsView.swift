@@ -79,6 +79,7 @@ struct SettingsView: View {
     @State private var tab: SettingsTab = .general
     @State private var draggedApp: String?
     @State private var openWindows: [WindowInfo] = []
+    @State private var advancedSizingExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -279,57 +280,100 @@ struct SettingsView: View {
 
                 section("Sizing") {
                     VStack(spacing: 0) {
-                        row(title: "Columns",
-                            detail: "Number of columns in the grid view. \(prefs.gridColumns)") {
-                            Slider(value: Binding(
-                                get: { Double(prefs.gridColumns) },
-                                set: { prefs.gridColumns = Int($0.rounded()) }
-                            ), in: 3...6, step: 1)
-                                .frame(width: 140)
-                                .tint(prefs.accent.color)
-                        }
-                        Divider().opacity(0.4)
-                        row(title: "Rows",
-                            detail: "Rows visible at once in the list view. \(prefs.maxListRows)") {
-                            Slider(value: Binding(
-                                get: { Double(prefs.maxListRows) },
-                                set: { prefs.maxListRows = Int($0.rounded()) }
-                            ), in: Double(SwitchPreferenceRules.maxListRowsRange.lowerBound)...Double(SwitchPreferenceRules.maxListRowsRange.upperBound), step: 1)
-                                .frame(width: 140)
-                                .tint(prefs.accent.color)
-                        }
-                        Divider().opacity(0.4)
-                        row(title: "List width",
-                            detail: "Width of the vertical list. \(Int(prefs.listWidth))pt") {
-                            Slider(
-                                value: $prefs.listWidth,
-                                in: SwitchPreferenceRules.listWidthRange,
-                                step: 10
-                            )
-                            .frame(width: 140)
-                            .tint(prefs.accent.color)
-                        }
-                        Divider().opacity(0.4)
-                        row(title: "Thumbnail size",
-                            detail: "Overall picker size. \(Int(prefs.thumbnailHeight))pt") {
-                            Slider(value: $prefs.thumbnailHeight, in: 80...300, step: 5)
-                                .frame(width: 140)
-                                .tint(prefs.accent.color)
-                        }
-                        Divider().opacity(0.4)
-                        row(title: "App icon size",
-                            detail: "Size of the app icon on each tile and list row. \(Int(prefs.appIconSize))pt") {
-                            Slider(value: $prefs.appIconSize, in: 20...48, step: 2)
-                                .frame(width: 140)
-                                .tint(prefs.accent.color)
-                        }
-                        Divider().opacity(0.4)
-                        row(title: "Reset sizing",
-                            detail: "Restore columns, list rows and width, thumbnail size, and app icon size.") {
-                            Button("Reset") {
-                                resetSizing()
+                        row(title: "Picker size",
+                            detail: "Scale the picker, text, search field, previews, icons, and spacing together.") {
+                            Picker(selection: $prefs.pickerSize) {
+                                ForEach(PickerSizeChoice.allCases) { size in
+                                    Text(size.label).tag(size)
+                                }
+                            } label: {
+                                EmptyView()
                             }
-                            .buttonStyle(.bordered)
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(width: 210)
+                        }
+                        Divider().opacity(0.4)
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.16)) {
+                                advancedSizingExpanded.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Advanced sizing", comment: "Picker sizing disclosure")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                    Text("Fine-tune the grid, list, previews, and app icons.", comment: "Picker sizing disclosure detail")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .rotationEffect(.degrees(advancedSizingExpanded ? 90 : 0))
+                            }
+                            .contentShape(Rectangle())
+                            .padding(14)
+                            .background(rowBackground)
+                        }
+                        .buttonStyle(.plain)
+
+                        if advancedSizingExpanded {
+                            Divider().opacity(0.4)
+                            row(title: "Columns",
+                                detail: "Maximum columns in the grid. Fewer candidates use fewer, larger columns. \(prefs.gridColumns)") {
+                                Slider(value: Binding(
+                                    get: { Double(prefs.gridColumns) },
+                                    set: { prefs.gridColumns = Int($0.rounded()) }
+                                ), in: 3...6, step: 1)
+                                    .frame(width: 140)
+                                    .tint(prefs.accent.color)
+                            }
+                            Divider().opacity(0.4)
+                            row(title: "Rows",
+                                detail: "Rows visible at once in the list view. \(prefs.maxListRows)") {
+                                Slider(value: Binding(
+                                    get: { Double(prefs.maxListRows) },
+                                    set: { prefs.maxListRows = Int($0.rounded()) }
+                                ), in: Double(SwitchPreferenceRules.maxListRowsRange.lowerBound)...Double(SwitchPreferenceRules.maxListRowsRange.upperBound), step: 1)
+                                    .frame(width: 140)
+                                    .tint(prefs.accent.color)
+                            }
+                            Divider().opacity(0.4)
+                            row(title: "List width",
+                                detail: "Base width of the vertical list. \(Int(prefs.listWidth))pt") {
+                                Slider(
+                                    value: $prefs.listWidth,
+                                    in: SwitchPreferenceRules.listWidthRange,
+                                    step: 10
+                                )
+                                .frame(width: 140)
+                                .tint(prefs.accent.color)
+                            }
+                            Divider().opacity(0.4)
+                            row(title: "Thumbnail size",
+                                detail: "Base preview height and grid frame before automatic enlargement. \(Int(prefs.thumbnailHeight))pt") {
+                                Slider(value: $prefs.thumbnailHeight, in: 80...300, step: 5)
+                                    .frame(width: 140)
+                                    .tint(prefs.accent.color)
+                            }
+                            Divider().opacity(0.4)
+                            row(title: "App icon size",
+                                detail: "Base app icon size before overall scaling. \(Int(prefs.appIconSize))pt") {
+                                Slider(value: $prefs.appIconSize, in: 20...48, step: 2)
+                                    .frame(width: 140)
+                                    .tint(prefs.accent.color)
+                            }
+                            Divider().opacity(0.4)
+                            row(title: "Reset sizing",
+                                detail: "Restore the large preset and all advanced sizing defaults.") {
+                                Button("Reset") {
+                                    resetSizing()
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
                     }
                 }
@@ -426,6 +470,7 @@ struct SettingsView: View {
     }
 
     private func resetSizing() {
+        prefs.pickerSize = .large
         prefs.gridColumns = SwitchPreferences.defaultGridColumns
         prefs.maxListRows = SwitchPreferences.defaultMaxListRows
         prefs.listWidth = SwitchPreferences.defaultListWidth

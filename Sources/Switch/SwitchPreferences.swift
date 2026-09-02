@@ -2,6 +2,30 @@ import AppKit
 import SwiftUI
 import Combine
 
+enum PickerSizeChoice: String, CaseIterable, Identifiable {
+    case compact
+    case standard
+    case large
+
+    var id: String { rawValue }
+
+    var label: LocalizedStringResource {
+        switch self {
+        case .compact: "Compact"
+        case .standard: "Standard"
+        case .large: "Large"
+        }
+    }
+
+    var scale: CGFloat {
+        switch self {
+        case .compact: CGFloat(SwitchPreferenceRules.compactPickerScale)
+        case .standard: CGFloat(SwitchPreferenceRules.standardPickerScale)
+        case .large: CGFloat(SwitchPreferenceRules.largePickerScale)
+        }
+    }
+}
+
 @MainActor
 final class SwitchPreferences: ObservableObject {
     static let shared = SwitchPreferences()
@@ -74,6 +98,10 @@ final class SwitchPreferences: ObservableObject {
 
     @Published var backgroundBlur: BackgroundBlur {
         didSet { UserDefaults.standard.set(backgroundBlur.rawValue, forKey: backgroundBlurKey) }
+    }
+
+    @Published var pickerSize: PickerSizeChoice {
+        didSet { UserDefaults.standard.set(pickerSize.rawValue, forKey: SwitchPreferences.pickerSizeKey) }
     }
 
     @Published var showTitleFirst: Bool {
@@ -232,6 +260,7 @@ final class SwitchPreferences: ObservableObject {
     nonisolated static let gridColumnsKey = "switch.gridColumns"
     nonisolated static let maxListRowsKey = "switch.maxListRows"
     nonisolated static let listWidthKey = "switch.listWidth"
+    nonisolated static let pickerSizeKey = "switch.pickerSize"
     nonisolated static let pinnedBundleIDsKey = "switch.pinnedBundleIDs"
     nonisolated static let pickerActivationDelayKey = "switch.pickerActivationDelay"
     nonisolated static let shiftTapReversesKey = "switch.shiftTapReverses"
@@ -242,6 +271,11 @@ final class SwitchPreferences: ObservableObject {
     private init() {
         accent = AccentChoice(rawValue: UserDefaults.standard.string(forKey: accentKey) ?? "") ?? .system
         backgroundBlur = BackgroundBlur(rawValue: UserDefaults.standard.string(forKey: backgroundBlurKey) ?? "") ?? .light
+        pickerSize = PickerSizeChoice(rawValue: SwitchPreferenceRules.resolvedPickerSizeRawValue(
+            storedRawValue: UserDefaults.standard.string(forKey: SwitchPreferences.pickerSizeKey),
+            legacyThumbnailHeight: UserDefaults.standard.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double,
+            legacyAppIconSize: UserDefaults.standard.object(forKey: SwitchPreferences.appIconSizeKey) as? Double
+        )) ?? .large
         showTitleFirst = UserDefaults.standard.bool(forKey: showTitleFirstKey)
         showCrossSpace = (UserDefaults.standard.object(forKey: SwitchPreferences.crossSpaceKey) as? Bool) ?? true
         stickyMode = UserDefaults.standard.bool(forKey: SwitchPreferences.stickyModeKey)
@@ -283,5 +317,6 @@ final class SwitchPreferences: ObservableObject {
         // the old thumbnail-derived visual width when no dedicated key existed.
         UserDefaults.standard.set(maxListRows, forKey: SwitchPreferences.maxListRowsKey)
         UserDefaults.standard.set(listWidth, forKey: SwitchPreferences.listWidthKey)
+        UserDefaults.standard.set(pickerSize.rawValue, forKey: SwitchPreferences.pickerSizeKey)
     }
 }

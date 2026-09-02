@@ -5,6 +5,7 @@ import SwiftUI
 /// undo stack, and standard key bindings. SwiftUI only owns its placement.
 struct PickerSearchField: NSViewRepresentable {
     let text: String
+    var visualScale: CGFloat = 1
     let onTextChange: (String) -> Void
     let onFocusChange: (NSSearchField, Bool) -> Void
     let onRegister: (NSSearchField) -> Void
@@ -33,13 +34,7 @@ struct PickerSearchField: NSViewRepresentable {
             coordinator.navigate(direction, from: field)
         }
         field.placeholderString = String(localized: "Type to filter")
-        field.font = .systemFont(ofSize: 13, weight: .regular)
-        field.textColor = .labelColor
-        field.controlSize = .regular
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.backgroundColor = .clear
-        field.focusRingType = .none
+        PickerSearchFieldAppearance.apply(to: field, visualScale: visualScale)
         field.maximumRecents = 0
         field.sendsSearchStringImmediately = true
         field.setAccessibilityLabel(String(localized: "Type to filter"))
@@ -50,6 +45,9 @@ struct PickerSearchField: NSViewRepresentable {
     func updateNSView(_ field: NSSearchField, context: Context) {
         context.coordinator.parent = self
         onRegister(field)
+        if field.font?.pointSize != PickerSearchFieldAppearance.fontSize(for: visualScale) {
+            PickerSearchFieldAppearance.apply(to: field, visualScale: visualScale)
+        }
         let editor = field.currentEditor() as? NSTextView
         let currentText = editor?.string ?? field.stringValue
         guard currentText != text else { return }

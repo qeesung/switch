@@ -152,37 +152,135 @@ final class SwitcherPanelLayoutTests: XCTestCase {
         XCTAssertEqual(result.size.height, 260)
     }
 
-    func testGridUsesMeasuredTileGeometry() {
-        let result = SwitcherPanelLayout.grid(
-            baseWidth: 880,
-            minimumWidth: 560,
+    func testGridFrameStaysFixedAcrossCandidateCounts() {
+        let short = SwitcherPanelLayout.grid(
+            targetWidth: 880,
+            targetHeight: 560,
             itemCount: 2,
             configuredColumns: 4,
-            tileHeight: 182,
-            headerHeight: 36,
-            hintHeight: 34,
+            widthLimit: nil,
+            heightLimit: nil
+        )
+        let long = SwitcherPanelLayout.grid(
+            targetWidth: 880,
+            targetHeight: 560,
+            itemCount: 12,
+            configuredColumns: 4,
+            widthLimit: nil,
             heightLimit: nil
         )
 
-        XCTAssertEqual(result.visibleRows, 1)
-        XCTAssertEqual(result.size.width, 667.5)
-        XCTAssertEqual(result.size.height, 320)
+        XCTAssertEqual(short.size, CGSize(width: 880, height: 560))
+        XCTAssertEqual(long.size, short.size)
+        XCTAssertEqual(short.visibleRows, 1)
+        XCTAssertEqual(long.visibleRows, 3)
     }
 
-    func testGridHonorsHeightLimit() {
+    func testGridHonorsScreenLimits() {
         let result = SwitcherPanelLayout.grid(
-            baseWidth: 880,
-            minimumWidth: 560,
+            targetWidth: 1_056,
+            targetHeight: 672,
             itemCount: 12,
             configuredColumns: 4,
-            tileHeight: 182,
-            headerHeight: 36,
-            hintHeight: 34,
-            heightLimit: 560
+            widthLimit: 900,
+            heightLimit: 600
         )
 
-        XCTAssertEqual(result.visibleRows, 3)
-        XCTAssertEqual(result.size.width, 880)
-        XCTAssertEqual(result.size.height, 560)
+        XCTAssertEqual(result.size, CGSize(width: 900, height: 600))
+    }
+
+    func testEffectiveGridColumnsTreatsConfiguredColumnsAsMaximum() {
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 0, configuredColumns: 4), 1)
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 1, configuredColumns: 4), 1)
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 2, configuredColumns: 4), 2)
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 3, configuredColumns: 4), 3)
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 4, configuredColumns: 4), 4)
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 5, configuredColumns: 4), 4)
+        XCTAssertEqual(SwitcherPanelLayout.effectiveGridColumns(itemCount: 5, configuredColumns: 6), 5)
+    }
+
+    func testAdaptiveGridEnlargesThumbnailsAsCandidatesDisappear() {
+        let heights = (1...4).map { count in
+            SwitcherPanelLayout.adaptiveGrid(
+                panelWidth: 880,
+                itemCount: count,
+                configuredColumns: 4,
+                baseThumbnailHeight: 130,
+                compactThumbnailHeight: 72,
+                showsThumbnails: true,
+                visualScale: 1,
+                verticalCapacity: 500
+            ).thumbnailHeight
+        }
+
+        XCTAssertEqual(heights[0], 390, accuracy: 0.001)
+        XCTAssertEqual(heights[1], 411 / 1.55, accuracy: 0.001)
+        XCTAssertEqual(heights[2], (808 / 3) / 1.55, accuracy: 0.001)
+        XCTAssertEqual(heights[3], 130, accuracy: 0.001)
+        XCTAssertGreaterThan(heights[0], heights[1])
+        XCTAssertGreaterThan(heights[1], heights[2])
+        XCTAssertGreaterThan(heights[2], heights[3])
+    }
+
+    func testAdaptiveGridScalesGeometryForLargePreset() {
+        let result = SwitcherPanelLayout.adaptiveGrid(
+            panelWidth: 1_056,
+            itemCount: 2,
+            configuredColumns: 4,
+            baseThumbnailHeight: 156,
+            compactThumbnailHeight: 86.4,
+            showsThumbnails: true,
+            visualScale: 1.2,
+            verticalCapacity: 560
+        )
+
+        XCTAssertEqual(result.columns, 2)
+        XCTAssertEqual(result.thumbnailHeight, 493.2 / 1.55, accuracy: 0.001)
+    }
+
+    func testAdaptiveGridCapsThumbnailAtVerticalCapacity() {
+        let result = SwitcherPanelLayout.adaptiveGrid(
+            panelWidth: 880,
+            itemCount: 1,
+            configuredColumns: 4,
+            baseThumbnailHeight: 130,
+            compactThumbnailHeight: 72,
+            showsThumbnails: true,
+            visualScale: 1,
+            verticalCapacity: 250
+        )
+
+        XCTAssertEqual(result.thumbnailHeight, 250)
+    }
+
+    func testAdaptiveGridShrinksConfiguredBaseOnAnExtremelyShortScreen() {
+        let result = SwitcherPanelLayout.adaptiveGrid(
+            panelWidth: 880,
+            itemCount: 4,
+            configuredColumns: 4,
+            baseThumbnailHeight: 130,
+            compactThumbnailHeight: 72,
+            showsThumbnails: true,
+            visualScale: 1,
+            verticalCapacity: 100
+        )
+
+        XCTAssertEqual(result.thumbnailHeight, 100)
+    }
+
+    func testAdaptiveGridKeepsCompactHeightWithoutThumbnails() {
+        let result = SwitcherPanelLayout.adaptiveGrid(
+            panelWidth: 1_056,
+            itemCount: 1,
+            configuredColumns: 4,
+            baseThumbnailHeight: 156,
+            compactThumbnailHeight: 86.4,
+            showsThumbnails: false,
+            visualScale: 1.2,
+            verticalCapacity: 560
+        )
+
+        XCTAssertEqual(result.columns, 1)
+        XCTAssertEqual(result.thumbnailHeight, 86.4, accuracy: 0.001)
     }
 }

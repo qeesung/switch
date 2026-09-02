@@ -149,6 +149,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { _ in resizePicker() }
             .store(in: &cancellables)
+        SwitchPreferences.shared.$pickerSize
+            .dropFirst()
+            .sink { _ in resizePicker() }
+            .store(in: &cancellables)
         SwitchPreferences.shared.$thumbnailHeight
             .dropFirst()
             .sink { _ in resizePicker() }
@@ -701,30 +705,39 @@ private enum SwitcherPanelSize {
     ) -> NSSize {
         let defaults = UserDefaults.standard
         let isList = defaults.bool(forKey: SwitchPreferences.verticalListKey)
-        let thumb = CGFloat((defaults.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double) ?? SwitchPreferences.defaultThumbnailHeight)
-        let scale = thumb / CGFloat(SwitchPreferences.defaultThumbnailHeight)
+        let pickerSize = PickerSizeChoice(
+            rawValue: defaults.string(forKey: SwitchPreferences.pickerSizeKey) ?? ""
+        ) ?? .large
+        let scale = pickerSize.scale
+        let thumbnailHeight = (defaults.object(
+            forKey: SwitchPreferences.thumbnailHeightKey
+        ) as? Double) ?? SwitchPreferences.defaultThumbnailHeight
+        let gridScale = CGFloat(SwitchPreferenceRules.gridScale(
+            pickerScale: Double(scale),
+            thumbnailHeight: thumbnailHeight
+        ))
         let count = max(itemCount, 1)
         // Keep this in lockstep with SwitchView.showHeader. A filter can reveal a
         // preference-hidden header and must budget its height instead of stealing it
         // from the final complete row.
         let showsHeader = mode == .spaces || !isList || filterHeader
             || ((defaults.object(forKey: SwitchPreferences.verticalShowHeaderKey) as? Bool) ?? true)
-        // Every mode sizes to the window count; a fixed panel leaves rows of empty backdrop (#134).
+        // Lists still fit whole rows to their content. Grids intentionally keep a
+        // preset-sized frame so filtering can enlarge cards without moving the panel.
         if mode == .spaces || isList {
             return listSize(
                 defaults: defaults,
                 count: count,
                 showsHeader: showsHeader,
                 metrics: metrics,
+                scale: scale,
                 screen: screen
             )
         }
         return gridSize(
             defaults: defaults,
             count: count,
-            thumb: thumb,
-            scale: scale,
-            metrics: metrics,
+            scale: gridScale,
             screen: screen
         )
     }
@@ -733,25 +746,25 @@ private enum SwitcherPanelSize {
         ceil(font.ascender - font.descender + font.leading)
     }
 
-    // Mirrors hintStrip: one line plus eight points of vertical padding per side.
-    private static let hintStripHeight: CGFloat = {
-        let label = lineHeight(.systemFont(ofSize: 11))
-        let key = lineHeight(.monospacedSystemFont(ofSize: 10, weight: .semibold)) + 2
-        return max(label, key) + 16
-    }()
+    // Mirrors the scaled hint strip and list-row geometry in SwitchView.
+    private static func hintStripHeight(scale: CGFloat) -> CGFloat {
+        let label = lineHeight(.systemFont(ofSize: 11 * scale))
+        let key = lineHeight(.monospacedSystemFont(ofSize: 10 * scale, weight: .semibold))
+            + 2 * scale
+        return max(label, key) + 16 * scale
+    }
 
-    // Mirrors listRow: tallest child plus six points of vertical padding per side.
-    private static let listRowTextHeight: CGFloat =
-        lineHeight(.systemFont(ofSize: 13, weight: .medium))
-        + 2
-        + lineHeight(.systemFont(ofSize: 11))
-    private static let listRowPreviewHeight: CGFloat = 50
-    private static let listRowVerticalPadding: CGFloat = 6
-
-    private static func listRowHeight(iconSize: CGFloat, showPreview: Bool) -> CGFloat {
-        var content = max(iconSize, listRowTextHeight)
-        if showPreview { content = max(content, listRowPreviewHeight) }
-        return content + listRowVerticalPadding * 2
+    private static func listRowHeight(
+        iconSize: CGFloat,
+        showPreview: Bool,
+        scale: CGFloat
+    ) -> CGFloat {
+        let textHeight = lineHeight(.systemFont(ofSize: 14 * scale, weight: .semibold))
+            + 2 * scale
+            + lineHeight(.systemFont(ofSize: 12 * scale))
+        var content = max(iconSize, textHeight)
+        if showPreview { content = max(content, 50 * scale) }
+        return content + 12 * scale
     }
 
     private static func measured(_ value: CGFloat, fallback: CGFloat) -> CGFloat {
@@ -763,6 +776,7 @@ private enum SwitcherPanelSize {
         count: Int,
         showsHeader: Bool,
         metrics: PanelMetrics,
+        scale: CGFloat,
         screen: NSScreen?
     ) -> NSSize {
         let showHints = (defaults.object(forKey: SwitchPreferences.showHintStripKey) as? Bool) ?? true
@@ -771,14 +785,16 @@ private enum SwitcherPanelSize {
         let iconSize = CGFloat(
             (defaults.object(forKey: SwitchPreferences.appIconSizeKey) as? Double)
                 ?? SwitchPreferences.defaultAppIconSize
-        )
-        let hintHeight = showHints ? measured(metrics.hintHeight, fallback: hintStripHeight) : 0
+        ) * scale
+        let hintHeight = showHints
+            ? measured(metrics.hintHeight, fallback: hintStripHeight(scale: scale))
+            : 0
         let rowHeight = measured(
             metrics.rowHeight,
-            fallback: listRowHeight(iconSize: iconSize, showPreview: showPreview)
+            fallback: listRowHeight(iconSize: iconSize, showPreview: showPreview, scale: scale)
         )
         // The measured header includes its 10pt top padding; the initial fallback does too.
-        let headerHeight = showsHeader ? measured(metrics.headerHeight, fallback: 36) : 0
+        let headerHeight = showsHeader ? measured(metrics.headerHeight, fallback: 44 * scale) : 0
         let maxRows = SwitchPreferenceRules.clampedMaxListRows(
             (defaults.object(forKey: SwitchPreferences.maxListRowsKey) as? Int)
                 ?? SwitchPreferences.defaultMaxListRows
@@ -786,7 +802,7 @@ private enum SwitcherPanelSize {
         let listWidth = SwitchPreferenceRules.resolvedListWidth(
             storedListWidth: defaults.object(forKey: SwitchPreferences.listWidthKey) as? Double,
             legacyThumbnailHeight: defaults.object(forKey: SwitchPreferences.thumbnailHeightKey) as? Double
-        )
+        ) * Double(scale)
         let result = SwitcherPanelLayout.list(
             width: CGFloat(listWidth),
             itemCount: count,
@@ -795,7 +811,8 @@ private enum SwitcherPanelSize {
             headerHeight: headerHeight,
             hintHeight: hintHeight,
             showsHeader: showsHeader,
-            heightLimit: screen.map { $0.visibleFrame.height * SwitcherPanelLayout.screenFraction }
+            heightLimit: screen.map { $0.visibleFrame.height * SwitcherPanelLayout.screenFraction },
+            visualScale: scale
         )
         return NSSize(
             width: fittedWidth(result.size.width, on: screen),
@@ -806,35 +823,21 @@ private enum SwitcherPanelSize {
     private static func gridSize(
         defaults: UserDefaults,
         count: Int,
-        thumb: CGFloat,
         scale: CGFloat,
-        metrics: PanelMetrics,
         screen: NSScreen?
     ) -> NSSize {
-        let showHints = (defaults.object(forKey: SwitchPreferences.showHintStripKey) as? Bool) ?? true
-        let showThumbs = (defaults.object(forKey: SwitchPreferences.showThumbnailsKey) as? Bool) ?? true
-        let tileThumb: CGFloat = showThumbs ? thumb : SwitchPreferences.compactThumbnailHeight
         let configuredColumns = (defaults.object(forKey: SwitchPreferences.gridColumnsKey) as? Int) ?? SwitchPreferences.defaultGridColumns
-        let baseWidth: CGFloat = 880 * scale
-        let tileHeight = measured(metrics.tileHeight, fallback: tileThumb + 52)
-        let hintHeight = showHints ? measured(metrics.hintHeight, fallback: hintStripHeight) : 0
-        let headerHeight = measured(metrics.headerHeight, fallback: 36)
-        let screenLimit = screen.map { $0.visibleFrame.height * SwitcherPanelLayout.screenFraction }
-        let heightLimit = min(560 * scale, screenLimit ?? .greatestFiniteMagnitude)
+        let targetWidth = max(560, 880 * scale)
+        let targetHeight = max(320, 560 * scale)
         let result = SwitcherPanelLayout.grid(
-            baseWidth: baseWidth,
-            minimumWidth: 560,
+            targetWidth: targetWidth,
+            targetHeight: targetHeight,
             itemCount: count,
             configuredColumns: configuredColumns,
-            tileHeight: tileHeight,
-            headerHeight: headerHeight,
-            hintHeight: hintHeight,
-            heightLimit: heightLimit
+            widthLimit: screen.map { $0.visibleFrame.width * SwitcherPanelLayout.screenFraction },
+            heightLimit: screen.map { $0.visibleFrame.height * SwitcherPanelLayout.screenFraction }
         )
-        return NSSize(
-            width: fittedWidth(result.size.width, on: screen),
-            height: result.size.height
-        )
+        return result.size
     }
 
     private static func fittedWidth(_ width: CGFloat, on screen: NSScreen?) -> CGFloat {
