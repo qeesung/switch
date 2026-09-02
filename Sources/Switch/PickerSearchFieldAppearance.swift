@@ -15,7 +15,6 @@ enum PickerSearchFieldAppearance {
         field.controlSize = .large
         field.isBezeled = true
         field.bezelStyle = .roundedBezel
-        field.drawsBackground = true
         field.focusRingType = .default
     }
 }

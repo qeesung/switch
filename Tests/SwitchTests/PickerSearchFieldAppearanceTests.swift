@@ -8,7 +8,6 @@ final class PickerSearchFieldAppearanceTests: XCTestCase {
 
         XCTAssertTrue(field.isBezeled)
         XCTAssertEqual(field.bezelStyle, .roundedBezel)
-        XCTAssertTrue(field.drawsBackground)
         XCTAssertEqual(field.focusRingType, .default)
         XCTAssertEqual(field.controlSize, .large)
         XCTAssertEqual(try XCTUnwrap(field.font).pointSize, 16.8, accuracy: 0.001)
