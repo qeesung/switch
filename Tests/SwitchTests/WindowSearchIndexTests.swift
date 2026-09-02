@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import XCTest
 
 final class WindowSearchIndexTests: XCTestCase {
@@ -8,6 +9,79 @@ final class WindowSearchIndexTests: XCTestCase {
         index.synchronize(with: windows)
 
         XCTAssertEqual(index.filtered(windows, query: "feishu").map(\.id), [1])
+    }
+
+    func testFullPinyinHighlightsOriginalChineseCharacters() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "飞书", title: "消息")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "feishu").first)
+        XCTAssertEqual(result.appNameMatch?.kind, .phonetic)
+        XCTAssertEqual(
+            result.appNameMatch?.characterOffsets,
+            IndexSet(integersIn: 0..<2)
+        )
+        XCTAssertNil(result.titleMatch)
+    }
+
+    func testPartialPinyinCollapsesMatchesOntoSourceCharacter() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "飞书", title: "")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "fi").first)
+        XCTAssertEqual(result.appNameMatch?.characterOffsets, IndexSet(integer: 0))
+    }
+
+    func testNoncontiguousPinyinHighlightsOnlyMatchedSourceCharacters() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "Lark", title: "飞书会议")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "fsy").first)
+        XCTAssertEqual(result.titleMatch?.characterOffsets, IndexSet([0, 1, 3]))
+    }
+
+    func testDirectFuzzyMatchHighlightsExactGraphemes() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "Safari", title: "")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "sfr").first)
+        XCTAssertEqual(result.appNameMatch?.kind, .direct)
+        XCTAssertEqual(result.appNameMatch?.characterOffsets, IndexSet([0, 2, 4]))
+    }
+
+    func testAppNameAndTitleMatchesAreIndependent() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "Feishu Helper", title: "飞书会议")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "feishu").first)
+        XCTAssertEqual(result.appNameMatch?.kind, .direct)
+        XCTAssertEqual(result.titleMatch?.kind, .phonetic)
+        XCTAssertEqual(result.appNameMatch?.characterOffsets, IndexSet(integersIn: 0..<6))
+        XCTAssertEqual(result.titleMatch?.characterOffsets, IndexSet(integersIn: 0..<2))
+    }
+
+    func testWholePhrasePinyinKeepsPolyphonicCharacterMapping() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "重庆", title: "")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "chongqing").first)
+        XCTAssertEqual(result.appNameMatch?.kind, .phonetic)
+        XCTAssertEqual(result.appNameMatch?.characterOffsets, IndexSet(integersIn: 0..<2))
+    }
+
+    func testHighlightOffsetsTreatEmojiAsOneGrapheme() throws {
+        var index = WindowSearchIndex()
+        let windows = [window(id: 1, appName: "👩‍💻Code Finder", title: "")]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "cf").first)
+        XCTAssertEqual(result.appNameMatch?.characterOffsets, IndexSet([1, 6]))
     }
 
     func testFullPinyinMatchesChineseWindowTitle() {

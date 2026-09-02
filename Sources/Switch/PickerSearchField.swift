@@ -33,19 +33,16 @@ struct PickerSearchField: NSViewRepresentable {
             coordinator.navigate(direction, from: field)
         }
         field.placeholderString = String(localized: "Type to filter")
-        field.font = .systemFont(ofSize: 13, weight: .medium)
-        field.controlSize = .small
-        field.focusRingType = .default
+        field.font = .systemFont(ofSize: 13, weight: .regular)
+        field.textColor = .labelColor
+        field.controlSize = .regular
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.backgroundColor = .clear
+        field.focusRingType = .none
         field.maximumRecents = 0
         field.sendsSearchStringImmediately = true
         field.setAccessibilityLabel(String(localized: "Type to filter"))
-
-        // Filtering has always used the ASCII-capable layout so a Chinese system
-        // can type raw pinyin (for example, `feishu`) without entering IME
-        // composition. Keep that behavior while the native editor is focused.
-        (field.cell as? NSSearchFieldCell)?.allowedInputSourceLocales = [
-            NSAllRomanInputSourcesLocaleIdentifier
-        ]
         onRegister(field)
         return field
     }
@@ -94,7 +91,11 @@ struct PickerSearchField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }
-            parent.onTextChange(field.stringValue)
+            // `stringValue` can lag the field editor while an input method owns
+            // marked text. Publish the editor's current composition so Chinese
+            // results update while the user is choosing a candidate.
+            let current = (field.currentEditor() as? NSTextView)?.string ?? field.stringValue
+            parent.onTextChange(current)
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
@@ -107,6 +108,11 @@ struct PickerSearchField: NSViewRepresentable {
             textView: NSTextView,
             doCommandBy commandSelector: Selector
         ) -> Bool {
+            // The input method owns Return, Escape, arrows, and number keys while
+            // it has marked text. Let NSTextInputContext consume the first key;
+            // the same key becomes a picker command again after composition ends.
+            guard !textView.hasMarkedText() else { return false }
+
             // While editing, AppKit sends key-binding commands to the shared
             // NSTextView field editor, not to NSSearchField.keyDown. Handle the
             // picker-reserved physical keys here so they remain ordered after
@@ -195,6 +201,10 @@ private final class NativeSearchField: NSSearchField {
     override var needsPanelToBecomeKey: Bool { true }
 
     override func keyDown(with event: NSEvent) {
+        if let editor = currentEditor() as? NSTextView, editor.hasMarkedText() {
+            super.keyDown(with: event)
+            return
+        }
         switch CGKeyCode(event.keyCode) {
         case 53:
             onCancel?()

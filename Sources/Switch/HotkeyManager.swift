@@ -386,7 +386,8 @@ final class HotkeyManager {
                             event,
                             kind: .terminal,
                             originalKeyCode: kc,
-                            originalFlags: flags
+                            originalFlags: flags,
+                            preserveOriginalKey: true
                         )
                     }
                     let generation = beginDismissal()
@@ -402,7 +403,8 @@ final class HotkeyManager {
                             event,
                             kind: .terminal,
                             originalKeyCode: kc,
-                            originalFlags: flags
+                            originalFlags: flags,
+                            preserveOriginalKey: true
                         )
                     }
                     let generation = beginDismissal()
@@ -481,7 +483,8 @@ final class HotkeyManager {
                 )
                 switch PickerInputRoutingPolicy.route(
                     nativeEditingAvailable: nativeEditing,
-                    pickerAction: characterAction
+                    pickerAction: characterAction,
+                    commandHeld: cmd
                 ) {
                 case .searchField:
                     return Unmanaged.passUnretained(event)
@@ -567,7 +570,8 @@ final class HotkeyManager {
         _ event: CGEvent,
         kind: PickerInputRoutingPolicy.OrderedEventKind,
         originalKeyCode: CGKeyCode,
-        originalFlags: CGEventFlags
+        originalFlags: CGEventFlags,
+        preserveOriginalKey: Bool = false
     ) -> Unmanaged<CGEvent> {
         let userData = PickerInputRoutingPolicy.orderedEventUserData(
             kind: kind,
@@ -575,6 +579,12 @@ final class HotkeyManager {
             flags: originalFlags
         )
         event.setIntegerValueField(.eventSourceUserData, value: userData)
+        if preserveOriginalKey {
+            // Return and Escape may belong to an active input-method
+            // composition. Keep their payload intact until the main AppKit
+            // event path can inspect the field editor's live marked-text state.
+            return Unmanaged.passUnretained(event)
+        }
         event.setIntegerValueField(
             .keyboardEventKeycode,
             value: Int64(Self.kcOrderedPickerMarker)
@@ -583,6 +593,24 @@ final class HotkeyManager {
         // application/system shortcut machinery with its original meaning.
         event.flags = []
         return Unmanaged.passUnretained(event)
+    }
+
+    /// Captures the exact input fence protecting an ordered terminal key. The
+    /// window calls this immediately before handing that key to NSTextInputContext.
+    func orderedInputMethodFenceGeneration(for event: NSEvent) -> UInt64? {
+        guard let cgEvent = event.cgEvent,
+              PickerInputRoutingPolicy.orderedKeyEvent(
+                from: cgEvent.getIntegerValueField(.eventSourceUserData)
+              )?.kind == .terminal else { return nil }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return dismissalPending ? dismissalGeneration : nil
+    }
+
+    /// Replays keys buffered behind an IME-owned Return/Escape only if no newer
+    /// dismissal superseded the fence while AppKit was processing composition.
+    func finishOrderedInputMethodEvent(fenceGeneration: UInt64) {
+        finishDismissal(ifGenerationUnchangedFrom: fenceGeneration)
     }
 
     /// Runs on AppKit's main event path after every earlier field-editor event.

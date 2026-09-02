@@ -131,12 +131,13 @@ final class PickerInputRoutingPolicyTests: XCTestCase {
         ))
     }
 
-    func testNativePickerCommandsUseOrderedAppKitEvents() {
+    func testNativePickerCommandsStayOrderedWhilePlainDigitsReachSearchField() {
         XCTAssertEqual(route(action: .closeSelected), .orderedPicker)
         XCTAssertEqual(route(action: .closeSelectedApp), .orderedPicker)
         XCTAssertEqual(route(action: .hideSelected), .orderedPicker)
         XCTAssertEqual(route(action: .openSettings), .orderedPicker)
-        XCTAssertEqual(route(action: .pickIndex(0)), .orderedPicker)
+        XCTAssertEqual(route(action: .pickIndex(0)), .searchField)
+        XCTAssertEqual(route(action: .pickIndex(0), commandHeld: true), .orderedPicker)
         XCTAssertEqual(route(action: nil), .searchField)
     }
 
@@ -238,10 +239,14 @@ final class PickerInputRoutingPolicyTests: XCTestCase {
         )
     }
 
-    private func route(action: PickerKeyInterpreter.Action?) -> PickerInputRoutingPolicy.Route {
+    private func route(
+        action: PickerKeyInterpreter.Action?,
+        commandHeld: Bool = false
+    ) -> PickerInputRoutingPolicy.Route {
         PickerInputRoutingPolicy.route(
             nativeEditingAvailable: true,
-            pickerAction: action
+            pickerAction: action,
+            commandHeld: commandHeld
         )
     }
 }

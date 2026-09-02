@@ -2,17 +2,161 @@ import CoreGraphics
 import Foundation
 
 struct WindowSearchIndex {
+    struct TextMatch: Equatable {
+        enum Kind: Equatable {
+            case direct
+            case phonetic
+        }
+
+        let kind: Kind
+        /// Grapheme-cluster offsets in the original app name or window title.
+        let characterOffsets: IndexSet
+    }
+
+    struct Result: Identifiable, Equatable {
+        let window: WindowInfo
+        let appNameMatch: TextMatch?
+        let titleMatch: TextMatch?
+
+        var id: CGWindowID { window.id }
+    }
+
+    /// A normalized string plus source-grapheme offsets for every normalized
+    /// character. The mapping lets `feishu` highlight `飞书`, rather than a
+    /// transliterated string that is never shown to the user.
+    private struct SearchProjection {
+        let text: String
+        let sourceOffsetSets: [IndexSet]
+
+        init(direct source: String) {
+            let sourceCharacters = Array(source)
+            var projectedCharacters: [Character] = []
+            var mappings: [IndexSet] = []
+            for (sourceOffset, character) in sourceCharacters.enumerated() {
+                let normalizedCharacters = Array(String(character).lowercased())
+                projectedCharacters.append(contentsOf: normalizedCharacters)
+                mappings.append(contentsOf: repeatElement(
+                    IndexSet(integer: sourceOffset),
+                    count: normalizedCharacters.count
+                ))
+            }
+
+            let expected = source.lowercased()
+            if String(projectedCharacters) == expected {
+                text = expected
+                sourceOffsetSets = mappings
+            } else {
+                text = expected
+                let allSourceOffsets = IndexSet(integersIn: 0..<sourceCharacters.count)
+                sourceOffsetSets = Array(repeating: allSourceOffsets, count: expected.count)
+            }
+        }
+
+        /// Transliterate each contiguous Han phrase once. Foundation keeps its
+        /// tone-free syllables separated, so the common path maps each syllable
+        /// directly to one source grapheme in O(n), including contextual readings
+        /// such as `重庆` -> `chong qing`.
+        init(phonetic source: String) {
+            let sourceCharacters = Array(source)
+            var projectedCharacters: [Character] = []
+            var mappings: [IndexSet] = []
+            var runStart = 0
+
+            while runStart < sourceCharacters.count {
+                let ideographic = WindowSearchIndex.isIdeographic(sourceCharacters[runStart])
+                var runEnd = runStart + 1
+                while runEnd < sourceCharacters.count,
+                      WindowSearchIndex.isIdeographic(sourceCharacters[runEnd]) == ideographic {
+                    runEnd += 1
+                }
+
+                let run = String(sourceCharacters[runStart..<runEnd])
+                let latin = WindowSearchIndex.toneFreeLatinText(run)
+                let compactCharacters = WindowSearchIndex.compactAlphanumerics(latin)
+
+                if ideographic {
+                    let syllables = WindowSearchIndex.alphanumericTokens(latin)
+                    if syllables.count == runEnd - runStart {
+                        for (syllableOffset, syllable) in syllables.enumerated() {
+                            let characters = Array(syllable)
+                            projectedCharacters.append(contentsOf: characters)
+                            mappings.append(contentsOf: repeatElement(
+                                IndexSet(integer: runStart + syllableOffset),
+                                count: characters.count
+                            ))
+                        }
+                    } else {
+                        Self.appendConservativeRun(
+                            characters: compactCharacters,
+                            sourceRange: runStart..<runEnd,
+                            projectedCharacters: &projectedCharacters,
+                            mappings: &mappings
+                        )
+                    }
+                } else {
+                    let alphanumericSourceOffsets = sourceCharacters[runStart..<runEnd]
+                        .enumerated()
+                        .compactMap { relativeOffset, character in
+                            character.unicodeScalars.contains(where: {
+                                CharacterSet.alphanumerics.contains($0)
+                            }) ? runStart + relativeOffset : nil
+                        }
+                    if alphanumericSourceOffsets.count == compactCharacters.count {
+                        projectedCharacters.append(contentsOf: compactCharacters)
+                        mappings.append(contentsOf: alphanumericSourceOffsets.map {
+                            IndexSet(integer: $0)
+                        })
+                    } else {
+                        Self.appendConservativeRun(
+                            characters: compactCharacters,
+                            sourceRange: runStart..<runEnd,
+                            projectedCharacters: &projectedCharacters,
+                            mappings: &mappings
+                        )
+                    }
+                }
+                runStart = runEnd
+            }
+
+            let expected = WindowSearchIndex.phoneticText(source)
+            if String(projectedCharacters) == expected {
+                text = expected
+                sourceOffsetSets = mappings
+            } else {
+                // If a script does not expose one token per grapheme, retain the
+                // exact pre-existing filter projection and highlight its source
+                // conservatively rather than showing a match with no highlight.
+                text = expected
+                let allSourceOffsets = IndexSet(integersIn: 0..<sourceCharacters.count)
+                sourceOffsetSets = Array(repeating: allSourceOffsets, count: expected.count)
+            }
+        }
+
+        private static func appendConservativeRun(
+            characters: [Character],
+            sourceRange: Range<Int>,
+            projectedCharacters: inout [Character],
+            mappings: inout [IndexSet]
+        ) {
+            projectedCharacters.append(contentsOf: characters)
+            mappings.append(contentsOf: repeatElement(
+                IndexSet(integersIn: sourceRange),
+                count: characters.count
+            ))
+        }
+    }
+
     /// Search projections depend only on a source string, so identical app names
     /// across many windows share one transliteration. This also avoids coupling
     /// the cache to CGWindowID's real/synthetic/Space-representative namespace.
     private struct IndexedText {
-        let direct: String
-        let phonetic: String?
+        let direct: SearchProjection
+        let phonetic: SearchProjection?
 
         init(_ value: String) {
-            direct = value.lowercased()
+            direct = SearchProjection(direct: value)
             phonetic = WindowSearchIndex.containsIdeographicText(value)
-                ? WindowSearchIndex.phoneticText(value)
+                ? SearchProjection(phonetic: value)
                 : nil
         }
     }
@@ -22,8 +166,18 @@ struct WindowSearchIndex {
         case direct
     }
 
-    private struct Match {
-        let window: WindowInfo
+    private struct ProjectionMatch {
+        let score: Int
+        let sourceOffsets: IndexSet
+    }
+
+    private struct FuzzyMatch {
+        let score: Int
+        let targetOffsets: [Int]
+    }
+
+    private struct RankedResult {
+        let result: Result
         let kind: MatchKind
         let score: Int
         let originalIndex: Int
@@ -43,8 +197,14 @@ struct WindowSearchIndex {
     }
 
     func filtered(_ windows: [WindowInfo], query: String) -> [WindowInfo] {
+        results(windows, query: query).map(\.window)
+    }
+
+    func results(_ windows: [WindowInfo], query: String) -> [Result] {
         let directPattern = query.lowercased()
-        guard !directPattern.isEmpty else { return windows }
+        guard !directPattern.isEmpty else {
+            return windows.map { Result(window: $0, appNameMatch: nil, titleMatch: nil) }
+        }
         // The pre-pinyin filter treats spaces, periods, and hyphens as literal
         // query characters. Restrict phonetic fallback to the unambiguous
         // `feishu` shape so adding transliteration does not broaden those old
@@ -53,32 +213,93 @@ struct WindowSearchIndex {
             ? Self.phoneticText(query)
             : ""
 
-        let matches: [Match] = windows.enumerated().compactMap { originalIndex, window in
+        let matches: [RankedResult] = windows.enumerated().compactMap { originalIndex, window in
             let app = entries[window.appName] ?? IndexedText(window.appName)
             let title = entries[window.title] ?? IndexedText(window.title)
-            if let score = Self.bestScore(
-                pattern: directPattern,
-                targets: [app.direct, title.direct]
-            ) {
-                return Match(window: window, kind: .direct, score: score, originalIndex: originalIndex)
+            let directApp = Self.match(pattern: directPattern, projection: app.direct)
+            let directTitle = Self.match(pattern: directPattern, projection: title.direct)
+
+            if directApp != nil || directTitle != nil {
+                let appMatch = Self.textMatch(
+                    direct: directApp,
+                    phoneticPattern: phoneticPattern,
+                    phonetic: app.phonetic
+                )
+                let titleMatch = Self.textMatch(
+                    direct: directTitle,
+                    phoneticPattern: phoneticPattern,
+                    phonetic: title.phonetic
+                )
+                return RankedResult(
+                    result: Result(
+                        window: window,
+                        appNameMatch: appMatch,
+                        titleMatch: titleMatch
+                    ),
+                    kind: .direct,
+                    score: max(directApp?.score ?? Int.min, directTitle?.score ?? Int.min),
+                    originalIndex: originalIndex
+                )
             }
-            guard !phoneticPattern.isEmpty,
-                  let score = Self.bestScore(
-                    pattern: phoneticPattern,
-                    targets: [app.phonetic, title.phonetic].compactMap { $0 }
-                  ) else { return nil }
-            return Match(window: window, kind: .phonetic, score: score, originalIndex: originalIndex)
+
+            guard !phoneticPattern.isEmpty else { return nil }
+            let phoneticApp = app.phonetic.flatMap {
+                Self.match(pattern: phoneticPattern, projection: $0)
+            }
+            let phoneticTitle = title.phonetic.flatMap {
+                Self.match(pattern: phoneticPattern, projection: $0)
+            }
+            guard phoneticApp != nil || phoneticTitle != nil else { return nil }
+            return RankedResult(
+                result: Result(
+                    window: window,
+                    appNameMatch: Self.textMatch(kind: .phonetic, match: phoneticApp),
+                    titleMatch: Self.textMatch(kind: .phonetic, match: phoneticTitle)
+                ),
+                kind: .phonetic,
+                score: max(phoneticApp?.score ?? Int.min, phoneticTitle?.score ?? Int.min),
+                originalIndex: originalIndex
+            )
         }
 
         return matches.sorted { lhs, rhs in
             if lhs.kind != rhs.kind { return lhs.kind.rawValue > rhs.kind.rawValue }
             if lhs.score != rhs.score { return lhs.score > rhs.score }
             return lhs.originalIndex < rhs.originalIndex
-        }.map(\.window)
+        }.map(\.result)
     }
 
-    private static func bestScore(pattern: String, targets: [String]) -> Int? {
-        targets.compactMap { fuzzyScore(pattern: pattern, target: $0) }.max()
+    private static func textMatch(
+        direct: ProjectionMatch?,
+        phoneticPattern: String,
+        phonetic: SearchProjection?
+    ) -> TextMatch? {
+        if let direct { return textMatch(kind: .direct, match: direct) }
+        guard !phoneticPattern.isEmpty, let phonetic else { return nil }
+        return textMatch(
+            kind: .phonetic,
+            match: match(pattern: phoneticPattern, projection: phonetic)
+        )
+    }
+
+    private static func textMatch(kind: TextMatch.Kind, match: ProjectionMatch?) -> TextMatch? {
+        guard let match else { return nil }
+        return TextMatch(kind: kind, characterOffsets: match.sourceOffsets)
+    }
+
+    private static func match(
+        pattern: String,
+        projection: SearchProjection
+    ) -> ProjectionMatch? {
+        guard let match = fuzzyMatch(pattern: pattern, target: projection.text) else { return nil }
+        var sourceOffsets = IndexSet()
+        for targetOffset in match.targetOffsets {
+            sourceOffsets.formUnion(projection.sourceOffsetSets[targetOffset])
+        }
+        return ProjectionMatch(
+            score: match.score,
+            sourceOffsets: sourceOffsets
+        )
     }
 
     private static func isPlainPinyinQuery(_ value: String) -> Bool {
@@ -91,32 +312,64 @@ struct WindowSearchIndex {
         value.unicodeScalars.contains { $0.properties.isIdeographic }
     }
 
+    private static func isIdeographic(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { $0.properties.isIdeographic }
+    }
+
+    private static func toneFreeLatinText(_ value: String) -> String {
+        let latin = value.applyingTransform(.toLatin, reverse: false) ?? value
+        let toneFree = latin.applyingTransform(.stripDiacritics, reverse: false) ?? latin
+        return toneFree.lowercased()
+    }
+
+    private static func compactAlphanumerics(_ value: String) -> [Character] {
+        Array(String(value.unicodeScalars.filter {
+            CharacterSet.alphanumerics.contains($0)
+        }))
+    }
+
+    private static func alphanumericTokens(_ value: String) -> [String] {
+        value.split(whereSeparator: { character in
+            !character.unicodeScalars.contains(where: {
+                CharacterSet.alphanumerics.contains($0)
+            })
+        }).map { token in
+            String(token.unicodeScalars.filter {
+                CharacterSet.alphanumerics.contains($0)
+            })
+        }.filter { !$0.isEmpty }
+    }
+
     /// Produces compact, lowercase, tone-free Latin text. Compacting whitespace and
     /// punctuation lets the common unspaced query `feishu` match Foundation's `fei shu`.
     static func phoneticText(_ value: String) -> String {
-        let latin = value.applyingTransform(.toLatin, reverse: false) ?? value
-        let toneFree = latin.applyingTransform(.stripDiacritics, reverse: false) ?? latin
-        return String(toneFree.lowercased().unicodeScalars.filter {
-            CharacterSet.alphanumerics.contains($0)
-        })
+        String(compactAlphanumerics(toneFreeLatinText(value)))
     }
 
     static func fuzzyScore(pattern: String, target: String) -> Int? {
-        let pat = Array(pattern)
-        let tgt = Array(target)
+        fuzzyMatch(pattern: pattern, target: target)?.score
+    }
+
+    private static func fuzzyMatch(pattern: String, target: String) -> FuzzyMatch? {
+        let patternCharacters = Array(pattern)
+        let targetCharacters = Array(target)
         var score = 0
-        var patIdx = 0
+        var patternIndex = 0
         var lastMatch = -1
-        for (i, character) in tgt.enumerated() {
-            guard patIdx < pat.count else { break }
-            if character == pat[patIdx] {
+        var matchedTargetOffsets: [Int] = []
+        for (targetIndex, character) in targetCharacters.enumerated() {
+            guard patternIndex < patternCharacters.count else { break }
+            if character == patternCharacters[patternIndex] {
                 score += 1
-                if lastMatch == i - 1 { score += 5 }
-                if i == 0 || !tgt[i - 1].isLetter { score += 3 }
-                lastMatch = i
-                patIdx += 1
+                if lastMatch == targetIndex - 1 { score += 5 }
+                if targetIndex == 0 || !targetCharacters[targetIndex - 1].isLetter { score += 3 }
+                lastMatch = targetIndex
+                matchedTargetOffsets.append(targetIndex)
+                patternIndex += 1
             }
         }
-        return patIdx == pat.count ? score : nil
+        return patternIndex == patternCharacters.count
+            ? FuzzyMatch(score: score, targetOffsets: matchedTargetOffsets)
+            : nil
     }
 }

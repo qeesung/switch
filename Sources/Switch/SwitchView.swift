@@ -67,7 +67,8 @@ struct SwitchView: View {
 
     @ViewBuilder
     private func numberHint(index: Int) -> some View {
-        if prefs.showNumberKeyHints && !isSpaceMode && index < 9 {
+        if prefs.showNumberKeyHints && !isSpaceMode
+            && !(model.stickySession && prefs.typeToFilter) && index < 9 {
             Text(verbatim: String(index + 1))
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
@@ -75,6 +76,35 @@ struct SwitchView: View {
                 .background(Color.black.opacity(0.55))
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         }
+    }
+
+    private func highlightedSearchText(
+        _ value: String,
+        match: WindowSearchIndex.TextMatch?,
+        size: CGFloat,
+        weight: Font.Weight,
+        baseColor: Color
+    ) -> Text {
+        guard let match, !match.characterOffsets.isEmpty else {
+            return Text(verbatim: value)
+                .font(.system(size: size, weight: weight))
+                .foregroundColor(baseColor)
+        }
+
+        var output = AttributedString(value)
+        output.foregroundColor = baseColor
+        let characterIndices = Array(output.characters.indices)
+        for matchedRange in match.characterOffsets.rangeView {
+            guard matchedRange.lowerBound < characterIndices.count else { continue }
+            let lowerBound = characterIndices[matchedRange.lowerBound]
+            let upperBound = matchedRange.upperBound < characterIndices.count
+                ? characterIndices[matchedRange.upperBound]
+                : output.endIndex
+            output[lowerBound..<upperBound].foregroundColor = prefs.accent.color
+            output[lowerBound..<upperBound].backgroundColor = prefs.accent.color.opacity(0.20)
+            output[lowerBound..<upperBound].font = .system(size: size, weight: .bold)
+        }
+        return Text(output).font(.system(size: size, weight: weight))
     }
 
     private func windowBadgeText(for window: WindowInfo) -> String {
@@ -158,7 +188,30 @@ struct SwitchView: View {
                     onCancel: { model.cancelAndDismiss?() },
                     onNavigate: { model.navigate(direction: $0) }
                 )
-                .frame(minWidth: 140, maxWidth: 320, minHeight: 22, maxHeight: 22)
+                .frame(minWidth: 170, idealWidth: 260, maxWidth: 360, minHeight: 24, maxHeight: 24)
+                .padding(.horizontal, 5)
+                .frame(height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.black.opacity(model.searchFieldFocused ? 0.28 : 0.20))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(
+                            model.searchFieldFocused
+                                ? prefs.accent.color.opacity(0.88)
+                                : Color.white.opacity(0.13),
+                            lineWidth: model.searchFieldFocused ? 1.25 : 1
+                        )
+                )
+                .shadow(
+                    color: model.searchFieldFocused
+                        ? prefs.accent.color.opacity(0.14)
+                        : Color.black.opacity(0.12),
+                    radius: model.searchFieldFocused ? 5 : 2,
+                    y: 1
+                )
+                .animation(.easeOut(duration: 0.14), value: model.searchFieldFocused)
                 .layoutPriority(1)
             } else if !model.filterText.isEmpty {
                 Text(model.filterText)
@@ -180,35 +233,35 @@ struct SwitchView: View {
             }
         }
         .padding(.horizontal, 22)
-        .frame(height: 26)
+        .frame(height: 30)
         .padding(.top, 10)
         .measureHeight(into: \.headerHeight)
     }
 
     private var grid: some View {
         ZStack {
-            let list = model.filteredWindows
-            if list.isEmpty {
+            let results = model.searchResults
+            if results.isEmpty {
                 emptyState
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: false) {
                         if isSpaceMode || prefs.verticalList {
                             LazyVStack(spacing: 4) {
-                                ForEach(Array(list.enumerated()), id: \.element.id) { idx, w in
-                                    listRow(window: w, index: idx)
+                                ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
+                                    listRow(result: result, index: idx)
                                         .measureHeight(into: \.rowHeight)
-                                        .id(w.id)
+                                        .id(result.id)
                                 }
                             }
                             .padding(.horizontal, 14)
                             .padding(.top, showHeader ? 10 : 14)
                         } else {
                             LazyVGrid(columns: gridColumns, spacing: 14) {
-                                ForEach(Array(list.enumerated()), id: \.element.id) { idx, w in
-                                    tile(window: w, index: idx, list: list)
+                                ForEach(Array(results.enumerated()), id: \.element.id) { idx, result in
+                                    tile(result: result, index: idx)
                                         .measureHeight(into: \.tileHeight)
-                                        .id(w.id)
+                                        .id(result.id)
                                 }
                             }
                             .padding(.horizontal, 22)
@@ -222,10 +275,10 @@ struct SwitchView: View {
                             lastSelectionFromMouse = false
                             return
                         }
-                        let cur = model.filteredWindows
+                        let cur = model.searchResults
                         guard cur.indices.contains(new) else { return }
                         withAnimation(switcherAnimation(.easeInOut(duration: 0.22))) {
-                            proxy.scrollTo(cur[new].id, anchor: .center)
+                            proxy.scrollTo(cur[new].window.id, anchor: .center)
                         }
                     }
                     // Viewport chrome, not scroll content: no row can occupy this space
@@ -353,7 +406,8 @@ struct SwitchView: View {
         Array(repeating: GridItem(.flexible(), spacing: 14), count: prefs.gridColumns)
     }
 
-    private func tile(window: WindowInfo, index: Int, list: [WindowInfo]) -> some View {
+    private func tile(result: WindowSearchIndex.Result, index: Int) -> some View {
+        let window = result.window
         let selected = index == model.selected
         let hovered = hoveredID == window.id
         let icon = appIcon(for: window)
@@ -416,17 +470,25 @@ struct SwitchView: View {
             HStack(spacing: 6) {
                 let titleFirst = prefs.showTitleFirst && !window.title.isEmpty
                 numberHint(index: index)
-                Text(titleFirst ? window.title : window.appName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.primary)
+                highlightedSearchText(
+                    titleFirst ? window.title : window.appName,
+                    match: titleFirst ? result.titleMatch : result.appNameMatch,
+                    size: 12,
+                    weight: .medium,
+                    baseColor: .primary
+                )
                     .lineLimit(1)
                 if !window.title.isEmpty {
                     Text(verbatim: "·")
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
-                    Text(titleFirst ? window.appName : window.title)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                    highlightedSearchText(
+                        titleFirst ? window.appName : window.title,
+                        match: titleFirst ? result.appNameMatch : result.titleMatch,
+                        size: 12,
+                        weight: .regular,
+                        baseColor: .secondary
+                    )
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -440,7 +502,8 @@ struct SwitchView: View {
         .onTapGesture { handleTap(index: index) }
     }
 
-    private func listRow(window: WindowInfo, index: Int) -> some View {
+    private func listRow(result: WindowSearchIndex.Result, index: Int) -> some View {
+        let window = result.window
         let selected = index == model.selected
         let hovered = hoveredID == window.id
         let icon = appIcon(for: window)
@@ -460,14 +523,22 @@ struct SwitchView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 let titleFirst = prefs.showTitleFirst && !window.title.isEmpty
-                Text(titleFirst ? window.title : window.appName)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
+                highlightedSearchText(
+                    titleFirst ? window.title : window.appName,
+                    match: titleFirst ? result.titleMatch : result.appNameMatch,
+                    size: 13,
+                    weight: .medium,
+                    baseColor: .primary
+                )
                     .lineLimit(1)
                 if !window.title.isEmpty {
-                    Text(titleFirst ? window.appName : window.title)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    highlightedSearchText(
+                        titleFirst ? window.appName : window.title,
+                        match: titleFirst ? result.appNameMatch : result.titleMatch,
+                        size: 11,
+                        weight: .regular,
+                        baseColor: .secondary
+                    )
                         .lineLimit(1)
                 }
             }

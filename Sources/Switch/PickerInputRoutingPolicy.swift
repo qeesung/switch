@@ -111,11 +111,17 @@ enum PickerInputRoutingPolicy {
     /// preceding character that AppKit has not put into the field editor yet.
     static func route(
         nativeEditingAvailable: Bool,
-        pickerAction: PickerKeyInterpreter.Action?
+        pickerAction: PickerKeyInterpreter.Action?,
+        commandHeld: Bool = false
     ) -> Route {
         if nativeEditingAvailable {
             switch pickerAction {
-            case .closeSelected, .closeSelectedApp, .hideSelected, .openSettings, .pickIndex:
+            case .pickIndex:
+                // A focused search field must accept digits, including the
+                // number keys used to choose Chinese input-method candidates.
+                // Command-number remains an explicit picker shortcut.
+                return commandHeld ? .orderedPicker : .searchField
+            case .closeSelected, .closeSelectedApp, .hideSelected, .openSettings:
                 return .orderedPicker
             case .appendFilter, nil:
                 return .searchField

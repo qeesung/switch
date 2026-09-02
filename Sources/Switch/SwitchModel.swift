@@ -57,7 +57,11 @@ final class SwitchModel: ObservableObject {
     var pointerWindowID: CGWindowID?
 
     var filteredWindows: [WindowInfo] {
-        searchIndex.filtered(windows, query: filterText)
+        searchResults.map(\.window)
+    }
+
+    var searchResults: [WindowSearchIndex.Result] {
+        searchIndex.results(windows, query: filterText)
     }
 
     func arm(

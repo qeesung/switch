@@ -57,6 +57,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onOrderedPickerEvent = { [weak hotkey] event in
             hotkey?.handleOrderedPickerEvent(event) ?? false
         }
+        window.orderedInputMethodFenceGeneration = { [weak hotkey] event in
+            hotkey?.orderedInputMethodFenceGeneration(for: event)
+        }
+        window.onFinishOrderedInputMethodEvent = { [weak hotkey] generation in
+            hotkey?.finishOrderedInputMethodEvent(fenceGeneration: generation)
+        }
         window.onOrderedHotkeyTransition = { [weak self, weak window] in
             guard let window else { return }
             self?.presentNowIfPending(window: window)
@@ -400,11 +406,14 @@ extension AppDelegate: SPUStandardUserDriverDelegate {
 final class SwitcherWindow: NSPanel {
     private let model: SwitchModel
     var onOrderedPickerEvent: ((NSEvent) -> Bool)?
+    var orderedInputMethodFenceGeneration: ((NSEvent) -> UInt64?)?
+    var onFinishOrderedInputMethodEvent: ((UInt64) -> Void)?
     var onOrderedHotkeyTransition: (() -> Void)?
     private var sizingSession = PanelSizingSession()
     private var wantsSearchFieldFocus = false
     private var wantsSearchSelectAll = false
     private var searchFocusGeneration = 0
+    private var deliveringOrderedInputMethodEvent = false
 
     init(model: SwitchModel) {
         self.model = model
@@ -440,11 +449,12 @@ final class SwitcherWindow: NSPanel {
     override var canBecomeMain: Bool { false }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if handleOrderedPickerEvent(event) { return true }
+        if !deliveringOrderedInputMethodEvent, handleOrderedPickerEvent(event) { return true }
         return super.performKeyEquivalent(with: event)
     }
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, passOrderedTerminalToInputMethodIfNeeded(event) { return }
         if event.type == .keyDown, handleOrderedPickerEvent(event) { return }
         if event.type == .otherMouseUp, event.buttonNumber == 2, model.visible,
            model.mode != .spaces,
@@ -454,6 +464,30 @@ final class SwitcherWindow: NSPanel {
             return
         }
         super.sendEvent(event)
+    }
+
+    /// The event tap fences Return/Escape before later hardware keys can pass it.
+    /// Only the main AppKit path can safely ask the field editor whether that key
+    /// belongs to a live IME composition.
+    private func passOrderedTerminalToInputMethodIfNeeded(_ event: NSEvent) -> Bool {
+        guard let cgEvent = event.cgEvent,
+              let ordered = PickerInputRoutingPolicy.orderedKeyEvent(
+                from: cgEvent.getIntegerValueField(.eventSourceUserData)
+              ),
+              ordered.kind == .terminal,
+              let field = model.registeredSearchField,
+              let editor = field.currentEditor() as? NSTextView,
+              editor.hasMarkedText() else { return false }
+
+        let fenceGeneration = orderedInputMethodFenceGeneration?(event)
+        deliveringOrderedInputMethodEvent = true
+        super.sendEvent(event)
+        deliveringOrderedInputMethodEvent = false
+        model.replaceFilter(editor.string)
+        if let fenceGeneration {
+            onFinishOrderedInputMethodEvent?(fenceGeneration)
+        }
+        return true
     }
 
     private func handleOrderedPickerEvent(_ event: NSEvent) -> Bool {
