@@ -53,6 +53,23 @@ final class WindowSearchIndexTests: XCTestCase {
         XCTAssertEqual(result.appNameMatch?.characterOffsets, IndexSet([0, 2, 4]))
     }
 
+    func testContiguousMatchWinsOverEarlierScatteredCharacters() throws {
+        var index = WindowSearchIndex()
+        let title = "rfc-qlrules-service-import-design.md — dgit"
+        let windows = [window(id: 1, appName: "Code", title: title)]
+        index.synchronize(with: windows)
+
+        let result = try XCTUnwrap(index.results(windows, query: "dgit").first)
+        let expectedStart = title.distance(
+            from: title.startIndex,
+            to: try XCTUnwrap(title.range(of: "dgit", options: .backwards)?.lowerBound)
+        )
+        XCTAssertEqual(
+            result.titleMatch?.characterOffsets,
+            IndexSet(integersIn: expectedStart..<(expectedStart + 4))
+        )
+    }
+
     func testAppNameAndTitleMatchesAreIndependent() throws {
         var index = WindowSearchIndex()
         let windows = [window(id: 1, appName: "Feishu Helper", title: "飞书会议")]

@@ -46,7 +46,6 @@ final class HotkeyManager {
     var onPickSelectOnly: ((Int) -> Void)?
     var onFilterAppend: ((Character) -> Void)?
     var onFilterBackspace: (() -> Void)?
-    var onSearchEditingCommand: ((PickerInputRoutingPolicy.SearchEditingCommand) -> Void)?
     var onStickyToggle: (() -> Void)?
     var onOpenSettings: (() -> Void)?
 
@@ -60,8 +59,6 @@ final class HotkeyManager {
     private var armedSequence: UInt64 = 0
     private var lastShift = false
     private var shiftTapPending = false
-    private var searchFieldFocused = false
-    private var stickyModifiersReleased = false
     private var dismissalPending = false
     private var dismissalGeneration: UInt64 = 0
     private var bufferedKeyDowns: [BufferedKeyDown] = []
@@ -86,9 +83,8 @@ final class HotkeyManager {
     private static let kcRightArrow: CGKeyCode = 124
     private static let kcDownArrow: CGKeyCode = 125
     private static let kcUpArrow: CGKeyCode = 126
-    /// A marker key with no normal text meaning. Ordered native picker commands
-    /// are rewritten to this key until SwitcherWindow consumes their user data.
-    private static let kcOrderedPickerMarker: CGKeyCode = 90 // F20
+    /// A marker key with no normal text meaning, used to acknowledge replayed input.
+    private static let kcReplaySentinel: CGKeyCode = 90 // F20
 
     func start() {
         if !ensureAccessibility() { return }
@@ -307,25 +303,10 @@ final class HotkeyManager {
             stateLock.lock()
             // Any key while Shift is down makes it a chord (⇧⌘W), not a reverse tap (#143).
             shiftTapPending = false
-            let nativeEditingBeforeHotkey = typeToFilter
-                && PickerInputRoutingPolicy.nativeEditingAvailable(
-                    searchFieldFocused: searchFieldFocused,
-                    stickySession: armedSticky,
-                    stickyModifiersReleased: stickyModifiersReleased
-                )
             stateLock.unlock()
 
             if let stickyBinding = HotkeyConfig.shared[.stickyToggle],
                stickyBinding.matchesTrigger(keyCode: kc, flags: flags) {
-                if nativeEditingBeforeHotkey {
-                    beginInputFence()
-                    return orderedPickerEvent(
-                        event,
-                        kind: .hotkey,
-                        originalKeyCode: kc,
-                        originalFlags: flags
-                    )
-                }
                 DispatchQueue.main.async { [weak self] in
                     self?.onStickyToggle?()
                 }
@@ -335,15 +316,6 @@ final class HotkeyManager {
             for (slot, style) in Self.armSlots {
                 guard let binding = HotkeyConfig.shared[slot],
                       binding.matchesTrigger(keyCode: kc, flags: flags) else { continue }
-                if nativeEditingBeforeHotkey {
-                    beginInputFence()
-                    return orderedPickerEvent(
-                        event,
-                        kind: .hotkey,
-                        originalKeyCode: kc,
-                        originalFlags: flags
-                    )
-                }
                 armOrAdvance(style, binding: binding, shift: shift)
                 if replayGeneration != nil {
                     // Replayed keyDowns have no matching hardware flagsChanged.
@@ -355,41 +327,14 @@ final class HotkeyManager {
             }
 
             stateLock.lock()
-            if armedSticky, let armedBinding {
-                // Recover a missed flagsChanged release as soon as a later key
-                // proves the invocation modifiers are no longer down.
-                stickyModifiersReleased = PickerInputRoutingPolicy.updatedStickyModifiersReleased(
-                    stickyModifiersReleased,
-                    hotkeyMatched: false,
-                    required: armedBinding.cgFlags,
-                    current: flags
-                )
-            }
             let armedMode = armed
             let activeBinding = armedBinding
             let sticky = armedSticky
-            let focusedSearchField = searchFieldFocused
-            let stickyWasReleased = stickyModifiersReleased
             stateLock.unlock()
 
             if armedMode != nil {
                 let actionModifierMatches = cmd && (sticky || !typeToFilter || shift)
-                let nativeEditing = typeToFilter && PickerInputRoutingPolicy.nativeEditingAvailable(
-                    searchFieldFocused: focusedSearchField,
-                    stickySession: sticky,
-                    stickyModifiersReleased: stickyWasReleased
-                )
                 if kc == Self.kcEscape {
-                    if nativeEditing {
-                        beginInputFence()
-                        return orderedPickerEvent(
-                            event,
-                            kind: .terminal,
-                            originalKeyCode: kc,
-                            originalFlags: flags,
-                            preserveOriginalKey: true
-                        )
-                    }
                     let generation = beginDismissal()
                     dispatchIfFenceCurrent(generation: generation) { [weak self] in
                         self?.onCancel?()
@@ -397,16 +342,6 @@ final class HotkeyManager {
                     return nil
                 }
                 if kc == Self.kcReturn || kc == Self.kcKeypadEnter {
-                    if nativeEditing {
-                        beginInputFence()
-                        return orderedPickerEvent(
-                            event,
-                            kind: .terminal,
-                            originalKeyCode: kc,
-                            originalFlags: flags,
-                            preserveOriginalKey: true
-                        )
-                    }
                     let generation = beginDismissal()
                     dispatchIfFenceCurrent(generation: generation) { [weak self] in
                         self?.onCommit?()
@@ -432,24 +367,12 @@ final class HotkeyManager {
                     return nil
                 }
                 if typeToFilter && kc == Self.kcDelete {
-                    if PickerInputRoutingPolicy.route(
-                        nativeEditingAvailable: nativeEditing,
-                        pickerAction: nil
-                    ) == .searchField {
-                        return Unmanaged.passUnretained(event)
-                    }
                     DispatchQueue.main.async { [weak self] in
                         self?.onFilterBackspace?()
                     }
                     return nil
                 }
                 if let direction = arrowDirection(for: kc) {
-                    if PickerInputRoutingPolicy.route(
-                        nativeEditingAvailable: nativeEditing,
-                        pickerAction: nil
-                    ) == .searchField {
-                        return Unmanaged.passUnretained(event)
-                    }
                     DispatchQueue.main.async { [weak self] in
                         self?.onNavigate?(direction)
                     }
@@ -460,20 +383,6 @@ final class HotkeyManager {
                     from: event,
                     translator: KeyboardLayoutTranslator.shared
                 )
-                if let editingCommand = PickerInputRoutingPolicy.searchEditingCommand(
-                    stickySession: sticky,
-                    typeToFilter: typeToFilter,
-                    commandHeld: cmd,
-                    shiftHeld: shift,
-                    logicalCharacter: character
-                ) {
-                    if nativeEditing { return Unmanaged.passUnretained(event) }
-                    guard stickyWasReleased else { return nil }
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onSearchEditingCommand?(editingCommand)
-                    }
-                    return nil
-                }
                 let characterAction = PickerKeyInterpreter.action(
                     logicalCharacter: character,
                     keyCode: kc,
@@ -481,25 +390,7 @@ final class HotkeyManager {
                     settingsModifierMatches: cmd || activeBinding?.modifiersHeld(flags) == true,
                     typeToFilter: typeToFilter
                 )
-                switch PickerInputRoutingPolicy.route(
-                    nativeEditingAvailable: nativeEditing,
-                    pickerAction: characterAction,
-                    commandHeld: cmd
-                ) {
-                case .searchField:
-                    return Unmanaged.passUnretained(event)
-                case .orderedPicker:
-                    beginInputFence()
-                    return orderedPickerEvent(
-                        event,
-                        kind: .pickerCommand,
-                        originalKeyCode: kc,
-                        originalFlags: flags
-                    )
-                case .discard:
-                    return nil
-                case .picker:
-                    guard let characterAction else { return nil }
+                if let characterAction {
                     let fenced: Bool
                     if case .appendFilter = characterAction { fenced = false }
                     else { fenced = true; beginInputFence() }
@@ -538,15 +429,6 @@ final class HotkeyManager {
                 }
             }
 
-            if armedSticky, let armedBinding {
-                stickyModifiersReleased = PickerInputRoutingPolicy.updatedStickyModifiersReleased(
-                   stickyModifiersReleased,
-                   hotkeyMatched: false,
-                   required: armedBinding.cgFlags,
-                   current: flags
-                )
-            }
-
             if !armingHeld {
                 if PickerSessionReleasePolicy.action(isSticky: armedSticky) == .commit {
                     beginInputFenceLocked()
@@ -566,147 +448,10 @@ final class HotkeyManager {
         return Unmanaged.passUnretained(event)
     }
 
-    private func orderedPickerEvent(
-        _ event: CGEvent,
-        kind: PickerInputRoutingPolicy.OrderedEventKind,
-        originalKeyCode: CGKeyCode,
-        originalFlags: CGEventFlags,
-        preserveOriginalKey: Bool = false
-    ) -> Unmanaged<CGEvent> {
-        let userData = PickerInputRoutingPolicy.orderedEventUserData(
-            kind: kind,
-            keyCode: originalKeyCode,
-            flags: originalFlags
-        )
-        event.setIntegerValueField(.eventSourceUserData, value: userData)
-        if preserveOriginalKey {
-            // Return and Escape may belong to an active input-method
-            // composition. Keep their payload intact until the main AppKit
-            // event path can inspect the field editor's live marked-text state.
-            return Unmanaged.passUnretained(event)
-        }
-        event.setIntegerValueField(
-            .keyboardEventKeycode,
-            value: Int64(Self.kcOrderedPickerMarker)
-        )
-        // In particular, never let a tagged Cmd+Q/Cmd+W or Cmd+Tab reach the
-        // application/system shortcut machinery with its original meaning.
-        event.flags = []
-        return Unmanaged.passUnretained(event)
-    }
-
-    /// Captures the exact input fence protecting an ordered terminal key. The
-    /// window calls this immediately before handing that key to NSTextInputContext.
-    func orderedInputMethodFenceGeneration(for event: NSEvent) -> UInt64? {
-        guard let cgEvent = event.cgEvent,
-              PickerInputRoutingPolicy.orderedKeyEvent(
-                from: cgEvent.getIntegerValueField(.eventSourceUserData)
-              )?.kind == .terminal else { return nil }
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return dismissalPending ? dismissalGeneration : nil
-    }
-
-    /// Replays keys buffered behind an IME-owned Return/Escape only if no newer
-    /// dismissal superseded the fence while AppKit was processing composition.
-    func finishOrderedInputMethodEvent(fenceGeneration: UInt64) {
-        finishDismissal(ifGenerationUnchangedFrom: fenceGeneration)
-    }
-
-    /// Runs on AppKit's main event path after every earlier field-editor event.
-    /// A valid marker is always consumed, even if the picker was dismissed while
-    /// it was in flight, so its harmless F20 payload never leaks to a responder.
-    func handleOrderedPickerEvent(_ event: NSEvent) -> Bool {
-        guard let cgEvent = event.cgEvent,
-              let ordered = PickerInputRoutingPolicy.orderedKeyEvent(
-                from: cgEvent.getIntegerValueField(.eventSourceUserData)
-              ) else { return false }
-
-        let keyCode = ordered.keyCode
-        let flags = ordered.flags
-        let shift = flags.contains(.maskShift)
-        if ordered.kind == .terminal {
-            stateLock.lock()
-            let generationBeforeAction = dismissalGeneration
-            stateLock.unlock()
-            if keyCode == Self.kcEscape { onCancel?() }
-            else if keyCode == Self.kcReturn || keyCode == Self.kcKeypadEnter { onCommit?() }
-            stateLock.lock()
-            let dismissalActuallyStarted = dismissalGeneration != generationBeforeAction
-            stateLock.unlock()
-            if !dismissalActuallyStarted { finishDismissal() }
-            return true
-        }
-        if ordered.kind == .hotkey {
-            stateLock.lock()
-            let generationBeforeHotkey = dismissalGeneration
-            stateLock.unlock()
-            if let stickyBinding = HotkeyConfig.shared[.stickyToggle],
-               stickyBinding.matchesTrigger(keyCode: keyCode, flags: flags) {
-                onStickyToggle?()
-                finishDismissal(ifGenerationUnchangedFrom: generationBeforeHotkey)
-                return true
-            }
-            for (slot, style) in Self.armSlots {
-                guard let binding = HotkeyConfig.shared[slot],
-                      binding.matchesTrigger(keyCode: keyCode, flags: flags) else { continue }
-                armOrAdvance(
-                    style,
-                    binding: binding,
-                    shift: shift,
-                    deliverSynchronously: true
-                )
-                // The physical modifier release can reach the tap before this marker
-                // reaches AppKit. Re-read hardware after arming so the new sequence
-                // does not remain non-native until the one-second watchdog fires.
-                recoverIfReleaseWasMissed()
-                finishDismissal(ifGenerationUnchangedFrom: generationBeforeHotkey)
-                return true
-            }
-            finishDismissal(ifGenerationUnchangedFrom: generationBeforeHotkey)
-            return true
-        }
-
-        stateLock.lock()
-        let generationBeforePicker = dismissalGeneration
-        let hasArmedPicker = armed != nil
-        let sticky = armedSticky
-        let activeBinding = armedBinding
-        stateLock.unlock()
-        defer { finishDismissal(ifGenerationUnchangedFrom: generationBeforePicker) }
-        guard hasArmedPicker else { return true }
-
-        let typeToFilter = (UserDefaults.standard.object(
-            forKey: SwitchPreferences.typeToFilterKey
-        ) as? Bool) ?? true
-        let command = flags.contains(.maskCommand)
-        let character = KeyboardLayoutTranslator.shared.character(
-            for: keyCode,
-            shift: shift
-        )
-        let action = PickerKeyInterpreter.action(
-            logicalCharacter: character,
-            keyCode: keyCode,
-            actionModifierMatches: command && (sticky || !typeToFilter || shift),
-            settingsModifierMatches: command || activeBinding?.modifiersHeld(flags) == true,
-            typeToFilter: typeToFilter
-        )
-        switch action {
-        case .closeSelected, .closeSelectedApp, .hideSelected, .openSettings, .pickIndex:
-            if let action {
-                performCharacterAction(action, chainSelection: command)
-            }
-        case .appendFilter, nil:
-            break
-        }
-        return true
-    }
-
     private func armOrAdvance(
         _ style: ArmStyle,
         binding: HotkeyBinding,
-        shift: Bool,
-        deliverSynchronously: Bool = false
+        shift: Bool
     ) {
         var effective = style
         effective.sticky = style.sticky || UserDefaults.standard.bool(forKey: SwitchPreferences.stickyModeKey)
@@ -735,23 +480,12 @@ final class HotkeyManager {
             // but release detection must follow the binding most recently used.
             armedBinding = binding
         }
-        // Repeating the same semantic hotkey is an advance, but it is still a
-        // fresh modifier chord. Keep raw events out of the field until this
-        // chord has also been fully released.
-        stickyModifiersReleased = PickerInputRoutingPolicy.updatedStickyModifiersReleased(
-            stickyModifiersReleased,
-            hotkeyMatched: true,
-            required: binding.cgFlags,
-            current: []
-        )
         armedSequence &+= 1
         stateLock.unlock()
-        let deliver: () -> Void = { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             if transition == .arm { self?.onArm?(effective) }
             else { self?.onAdvance?(shift) }
         }
-        if deliverSynchronously { deliver() }
-        else { DispatchQueue.main.async(execute: deliver) }
     }
 
     var isArmed: Bool {
@@ -766,8 +500,6 @@ final class HotkeyManager {
         armedSticky = false
         armedCurrentSpaceOnly = false
         shiftTapPending = false
-        searchFieldFocused = false
-        stickyModifiersReleased = false
     }
 
     func clearArmed() {
@@ -976,7 +708,7 @@ final class HotkeyManager {
     private func postReplaySentinel(generation: UInt64) {
         guard let event = CGEvent(
             keyboardEventSource: nil,
-            virtualKey: Self.kcOrderedPickerMarker,
+            virtualKey: Self.kcReplaySentinel,
             keyDown: true
         ) else {
             discardBufferedKeyDowns(
@@ -1002,12 +734,6 @@ final class HotkeyManager {
         stateLock.unlock()
     }
 
-    func setSearchFieldFocused(_ value: Bool) {
-        stateLock.lock()
-        searchFieldFocused = value
-        stateLock.unlock()
-    }
-
     func recoverIfReleaseWasMissed() {
         stateLock.lock()
         guard let mode = armed, let binding = armedBinding else {
@@ -1017,21 +743,8 @@ final class HotkeyManager {
         let sticky = armedSticky
         let sequence = armedSequence
         stateLock.unlock()
+        if sticky { return }
         let hardware = CGEventSource.flagsState(.combinedSessionState)
-        if sticky {
-            guard PickerInputRoutingPolicy.allInvocationModifiersReleased(
-                required: binding.cgFlags,
-                current: hardware
-            ) else { return }
-            stateLock.lock()
-            guard armed == mode, armedBinding == binding, armedSequence == sequence else {
-                stateLock.unlock()
-                return
-            }
-            stickyModifiersReleased = true
-            stateLock.unlock()
-            return
-        }
         guard !binding.modifiersHeld(hardware) else { return }
         stateLock.lock()
         guard armed == mode, armedBinding == binding, armedSequence == sequence else {

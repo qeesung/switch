@@ -3092,19 +3092,19 @@
         }
       }
     },
-    "Scale the picker, text, search field, previews, icons, and spacing together.": {
+    "Scale the picker, text, previews, icons, and spacing together.": {
       "comment": "Picker size setting detail",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Scale the picker, text, search field, previews, icons, and spacing together."
+            "value": "Scale the picker, text, previews, icons, and spacing together."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同步缩放选择器、文字、搜索框、预览、图标和间距。"
+            "value": "同步缩放选择器、文字、预览、图标和间距。"
           }
         }
       }

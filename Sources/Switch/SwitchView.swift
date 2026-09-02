@@ -71,8 +71,7 @@ struct SwitchView: View {
 
     @ViewBuilder
     private func numberHint(index: Int) -> some View {
-        if prefs.showNumberKeyHints && !isSpaceMode
-            && !(model.stickySession && prefs.typeToFilter) && index < 9 {
+        if prefs.showNumberKeyHints && !isSpaceMode && index < 9 {
             Text(verbatim: String(index + 1))
                 .font(.system(size: scaled(10), weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
@@ -181,27 +180,10 @@ struct SwitchView: View {
 
     private var header: some View {
         HStack(spacing: scaled(10)) {
-            if prefs.typeToFilter {
-                PickerSearchField(
-                    text: model.filterText,
-                    visualScale: visualScale,
-                    onTextChange: { model.replaceFilter($0) },
-                    onFocusChange: { model.setSearchFieldFocused($1, for: $0) },
-                    onRegister: { model.registerSearchField($0) },
-                    onUnregister: { model.unregisterSearchField($0) },
-                    onCommit: { model.commitAndDismiss?() },
-                    onCancel: { model.cancelAndDismiss?() },
-                    onNavigate: { model.navigate(direction: $0) }
-                )
-                .frame(
-                    minWidth: scaled(220),
-                    idealWidth: scaled(360),
-                    maxWidth: scaled(480),
-                    minHeight: scaled(34),
-                    maxHeight: scaled(34)
-                )
-                .layoutPriority(1)
-            } else if !model.filterText.isEmpty {
+            if !model.filterText.isEmpty {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: scaled(13), weight: .semibold))
+                    .foregroundStyle(.secondary)
                 Text(model.filterText)
                     .font(.system(size: scaled(14), weight: .semibold, design: .monospaced))
                     .foregroundStyle(.primary)

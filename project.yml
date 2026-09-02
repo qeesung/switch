@@ -61,7 +61,6 @@ targets:
       - path: Sources/Switch/PickerInputRoutingPolicy.swift
       - path: Sources/Switch/PickerScreenSelectionPolicy.swift
       - path: Sources/Switch/PickerSessionReleasePolicy.swift
-      - path: Sources/Switch/PickerSearchFieldAppearance.swift
       - path: Sources/Switch/SwitchPreferenceRules.swift
       - path: Sources/Switch/SwitcherPanelLayout.swift
       - path: Sources/Switch/WindowInfo.swift

@@ -353,23 +353,106 @@ struct WindowSearchIndex {
     private static func fuzzyMatch(pattern: String, target: String) -> FuzzyMatch? {
         let patternCharacters = Array(pattern)
         let targetCharacters = Array(target)
-        var score = 0
-        var patternIndex = 0
-        var lastMatch = -1
-        var matchedTargetOffsets: [Int] = []
-        for (targetIndex, character) in targetCharacters.enumerated() {
-            guard patternIndex < patternCharacters.count else { break }
-            if character == patternCharacters[patternIndex] {
-                score += 1
-                if lastMatch == targetIndex - 1 { score += 5 }
-                if targetIndex == 0 || !targetCharacters[targetIndex - 1].isLetter { score += 3 }
-                lastMatch = targetIndex
-                matchedTargetOffsets.append(targetIndex)
-                patternIndex += 1
-            }
+        guard !patternCharacters.isEmpty, patternCharacters.count <= targetCharacters.count else {
+            return nil
         }
-        return patternIndex == patternCharacters.count
-            ? FuzzyMatch(score: score, targetOffsets: matchedTargetOffsets)
-            : nil
+
+        // Keep the best match ending at each target character. The old greedy
+        // walk locked the first possible character forever, so `dgit` in
+        // `...design... — dgit` highlighted the `d` in `design` plus the final
+        // `git`. Considering all viable endings lets the existing adjacency and
+        // word-boundary bonuses select the contiguous occurrence instead.
+        var states = Array<FuzzyMatch?>(repeating: nil, count: targetCharacters.count)
+        for targetIndex in targetCharacters.indices
+            where targetCharacters[targetIndex] == patternCharacters[0] {
+            states[targetIndex] = FuzzyMatch(
+                score: characterScore(at: targetIndex, in: targetCharacters)
+                    + (targetIndex == 0 ? 5 : 0),
+                targetOffsets: [targetIndex]
+            )
+        }
+
+        for patternIndex in patternCharacters.indices.dropFirst() {
+            var next = Array<FuzzyMatch?>(repeating: nil, count: targetCharacters.count)
+            var bestNonAdjacent: FuzzyMatch?
+
+            for targetIndex in targetCharacters.indices {
+                if targetIndex >= 2, let candidate = states[targetIndex - 2],
+                   isBetterPrefix(candidate, than: bestNonAdjacent) {
+                    bestNonAdjacent = candidate
+                }
+                guard targetCharacters[targetIndex] == patternCharacters[patternIndex] else {
+                    continue
+                }
+
+                let baseScore = characterScore(at: targetIndex, in: targetCharacters)
+                if targetIndex > 0, let adjacent = states[targetIndex - 1] {
+                    next[targetIndex] = extending(
+                        adjacent,
+                        with: targetIndex,
+                        addedScore: baseScore + 5
+                    )
+                }
+                if let bestNonAdjacent {
+                    let candidate = extending(
+                        bestNonAdjacent,
+                        with: targetIndex,
+                        addedScore: baseScore
+                    )
+                    if isBetterEnding(candidate, than: next[targetIndex]) {
+                        next[targetIndex] = candidate
+                    }
+                }
+            }
+            states = next
+        }
+
+        return states.compactMap { $0 }.reduce(nil as FuzzyMatch?) { best, candidate in
+            isBetterCompleteMatch(candidate, than: best) ? candidate : best
+        }
+    }
+
+    private static func characterScore(at index: Int, in target: [Character]) -> Int {
+        1 + ((index == 0 || !target[index - 1].isLetter) ? 3 : 0)
+    }
+
+    private static func extending(
+        _ match: FuzzyMatch,
+        with targetOffset: Int,
+        addedScore: Int
+    ) -> FuzzyMatch {
+        FuzzyMatch(
+            score: match.score + addedScore,
+            targetOffsets: match.targetOffsets + [targetOffset]
+        )
+    }
+
+    /// Prefixes compete for the same future end offset, so a later start yields
+    /// the tighter final span when scores are equal.
+    private static func isBetterPrefix(_ candidate: FuzzyMatch, than current: FuzzyMatch?) -> Bool {
+        guard let current else { return true }
+        if candidate.score != current.score { return candidate.score > current.score }
+        return candidate.targetOffsets[0] > current.targetOffsets[0]
+    }
+
+    /// Matches ending at the same target character prefer the tighter span.
+    private static func isBetterEnding(_ candidate: FuzzyMatch, than current: FuzzyMatch?) -> Bool {
+        guard let current else { return true }
+        if candidate.score != current.score { return candidate.score > current.score }
+        return candidate.targetOffsets[0] > current.targetOffsets[0]
+    }
+
+    /// Across different endings, prefer score, then compactness, then the first
+    /// occurrence so equal matches remain visually stable.
+    private static func isBetterCompleteMatch(
+        _ candidate: FuzzyMatch,
+        than current: FuzzyMatch?
+    ) -> Bool {
+        guard let current else { return true }
+        if candidate.score != current.score { return candidate.score > current.score }
+        let candidateSpan = candidate.targetOffsets.last! - candidate.targetOffsets[0]
+        let currentSpan = current.targetOffsets.last! - current.targetOffsets[0]
+        if candidateSpan != currentSpan { return candidateSpan < currentSpan }
+        return candidate.targetOffsets[0] < current.targetOffsets[0]
     }
 }

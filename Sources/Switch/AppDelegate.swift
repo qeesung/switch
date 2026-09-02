@@ -54,19 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let model = SwitchModel()
         let window = SwitcherWindow(model: model)
         let hotkey = HotkeyManager()
-        window.onOrderedPickerEvent = { [weak hotkey] event in
-            hotkey?.handleOrderedPickerEvent(event) ?? false
-        }
-        window.orderedInputMethodFenceGeneration = { [weak hotkey] event in
-            hotkey?.orderedInputMethodFenceGeneration(for: event)
-        }
-        window.onFinishOrderedInputMethodEvent = { [weak hotkey] generation in
-            hotkey?.finishOrderedInputMethodEvent(fenceGeneration: generation)
-        }
-        window.onOrderedHotkeyTransition = { [weak self, weak window] in
-            guard let window else { return }
-            self?.presentNowIfPending(window: window)
-        }
         // @Published emits in willSet, before the preference didSet persists to
         // UserDefaults. Size on the next main-loop turn so calculations observe
         // the new value rather than lagging one change behind.
@@ -134,10 +121,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkey.onPickSelectOnly = { present(); model.selectIndex($0) }
         hotkey.onFilterAppend = { present(); model.appendFilter($0) }
         hotkey.onFilterBackspace = { present(); model.backspaceFilter() }
-        hotkey.onSearchEditingCommand = { command in
-            present()
-            window.performSearchEditingCommand(command)
-        }
         hotkey.onStickyToggle = {
             SwitchPreferences.shared.stickyMode.toggle()
         }
@@ -189,12 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .dropFirst()
             .sink { _ in resizePicker() }
-            .store(in: &cancellables)
-        model.$searchFieldFocused
-            .removeDuplicates()
-            .sink { [weak hotkey] focused in
-                hotkey?.setSearchFieldFocused(focused)
-            }
             .store(in: &cancellables)
         SwitchPreferences.shared.$showThumbnails
             .dropFirst()
@@ -409,15 +386,7 @@ extension AppDelegate: SPUStandardUserDriverDelegate {
 
 final class SwitcherWindow: NSPanel {
     private let model: SwitchModel
-    var onOrderedPickerEvent: ((NSEvent) -> Bool)?
-    var orderedInputMethodFenceGeneration: ((NSEvent) -> UInt64?)?
-    var onFinishOrderedInputMethodEvent: ((UInt64) -> Void)?
-    var onOrderedHotkeyTransition: (() -> Void)?
     private var sizingSession = PanelSizingSession()
-    private var wantsSearchFieldFocus = false
-    private var wantsSearchSelectAll = false
-    private var searchFocusGeneration = 0
-    private var deliveringOrderedInputMethodEvent = false
 
     init(model: SwitchModel) {
         self.model = model
@@ -435,7 +404,6 @@ final class SwitcherWindow: NSPanel {
         isMovable = false
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
-        becomesKeyOnlyIfNeeded = true
 
         let host = NSHostingView(rootView: SwitchView().environmentObject(model))
         host.wantsLayer = true
@@ -444,22 +412,12 @@ final class SwitcherWindow: NSPanel {
         host.layer?.masksToBounds = true
         contentView = host
         applyContentSize()
-        model.searchFieldDidRegister = { [weak self] _ in
-            self?.requestSearchFieldFocus()
-        }
     }
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if !deliveringOrderedInputMethodEvent, handleOrderedPickerEvent(event) { return true }
-        return super.performKeyEquivalent(with: event)
-    }
-
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, passOrderedTerminalToInputMethodIfNeeded(event) { return }
-        if event.type == .keyDown, handleOrderedPickerEvent(event) { return }
         if event.type == .otherMouseUp, event.buttonNumber == 2, model.visible,
            model.mode != .spaces,
            !UserDefaults.standard.bool(forKey: SwitchPreferences.disableMouseKey),
@@ -468,56 +426,6 @@ final class SwitcherWindow: NSPanel {
             return
         }
         super.sendEvent(event)
-    }
-
-    /// The event tap fences Return/Escape before later hardware keys can pass it.
-    /// Only the main AppKit path can safely ask the field editor whether that key
-    /// belongs to a live IME composition.
-    private func passOrderedTerminalToInputMethodIfNeeded(_ event: NSEvent) -> Bool {
-        guard let cgEvent = event.cgEvent,
-              let ordered = PickerInputRoutingPolicy.orderedKeyEvent(
-                from: cgEvent.getIntegerValueField(.eventSourceUserData)
-              ),
-              ordered.kind == .terminal,
-              let field = model.registeredSearchField,
-              let editor = field.currentEditor() as? NSTextView,
-              editor.hasMarkedText() else { return false }
-
-        let fenceGeneration = orderedInputMethodFenceGeneration?(event)
-        deliveringOrderedInputMethodEvent = true
-        super.sendEvent(event)
-        deliveringOrderedInputMethodEvent = false
-        model.replaceFilter(editor.string)
-        if let fenceGeneration {
-            onFinishOrderedInputMethodEvent?(fenceGeneration)
-        }
-        return true
-    }
-
-    private func handleOrderedPickerEvent(_ event: NSEvent) -> Bool {
-        guard let cgEvent = event.cgEvent,
-              let ordered = PickerInputRoutingPolicy.orderedKeyEvent(
-                from: cgEvent.getIntegerValueField(.eventSourceUserData)
-              ) else { return false }
-        // Delegate notifications normally keep this synchronized. Flush once
-        // more at the ordered command boundary so a close/pick can never observe
-        // a stale query even if a field-editor notification was coalesced. A
-        // hotkey transition is different: it resets the model, so writing the
-        // old editor back first would revive the previous session's query.
-        if ordered.kind == .pickerCommand || ordered.kind == .terminal,
-           let field = model.registeredSearchField,
-           let editor = field.currentEditor() as? NSTextView {
-            model.replaceFilter(editor.string)
-        }
-        _ = onOrderedPickerEvent?(event)
-        if ordered.kind == .hotkey, !model.searchFieldFocused {
-            // `onArm` has synchronously reset the query and focus state. Reuse
-            // the visible panel now (instead of waiting for activation delay) so
-            // any raw events already behind this marker see the new empty editor.
-            if let onOrderedHotkeyTransition { onOrderedHotkeyTransition() }
-            else { present() }
-        }
-        return true
     }
 
     func applyContentSize(for screen: NSScreen? = nil) {
@@ -557,22 +465,6 @@ final class SwitcherWindow: NSPanel {
             center(on: screen)
         }
         orderFrontRegardless()
-        if model.stickySession && SwitchPreferences.shared.typeToFilter {
-            wantsSearchFieldFocus = true
-            makeKey()
-            requestSearchFieldFocus()
-        } else if isKeyWindow {
-            wantsSearchFieldFocus = false
-            wantsSearchSelectAll = false
-            searchFocusGeneration &+= 1
-            model.setSearchFieldFocused(false)
-            makeFirstResponder(nil)
-            // `resignKey()` must not be invoked directly. Ordering a key window
-            // out transfers key status, and ordering this nonactivating panel
-            // straight back in preserves the hold picker's no-focus behavior.
-            orderOut(nil)
-            orderFrontRegardless()
-        }
     }
 
     private func center(on screen: NSScreen) {
@@ -584,114 +476,7 @@ final class SwitcherWindow: NSPanel {
     }
 
     func dismiss() {
-        wantsSearchFieldFocus = false
-        wantsSearchSelectAll = false
-        searchFocusGeneration &+= 1
-        model.setSearchFieldFocused(false)
-        makeFirstResponder(nil)
         orderOut(nil)
-    }
-
-    private func requestSearchFieldFocus() {
-        guard wantsSearchFieldFocus else { return }
-        searchFocusGeneration &+= 1
-        attemptSearchFieldFocus(generation: searchFocusGeneration, attempt: 0)
-    }
-
-    func requestSearchSelectAll() {
-        guard model.stickySession, SwitchPreferences.shared.typeToFilter else { return }
-        wantsSearchFieldFocus = true
-        wantsSearchSelectAll = true
-        if !isKeyWindow { makeKey() }
-        requestSearchFieldFocus()
-    }
-
-    func performSearchEditingCommand(
-        _ command: PickerInputRoutingPolicy.SearchEditingCommand
-    ) {
-        guard model.stickySession, SwitchPreferences.shared.typeToFilter else { return }
-        if command == .selectAll {
-            model.selectAllFilter()
-            requestSearchSelectAll()
-            return
-        }
-
-        wantsSearchFieldFocus = true
-        if !isKeyWindow { makeKey() }
-        requestSearchFieldFocus()
-        if let field = model.registeredSearchField,
-           let editor = field.currentEditor() as? NSTextView,
-           model.searchFieldFocused {
-            switch command {
-            case .selectAll: editor.selectAll(nil)
-            case .copy: editor.copy(nil)
-            case .paste: editor.paste(nil)
-            case .cut: editor.cut(nil)
-            case .undo: editor.undoManager?.undo()
-            case .redo: editor.undoManager?.redo()
-            }
-            field.stringValue = editor.string
-            model.replaceFilter(editor.string)
-            return
-        }
-
-        // The field can be a few milliseconds away from mounting on the first
-        // invocation. Preserve the common clipboard operations in model order;
-        // the focus retry will synchronize this value into the native editor.
-        let pasteboard = NSPasteboard.general
-        switch command {
-        case .paste:
-            if let text = pasteboard.string(forType: .string) {
-                model.insertFilterTextFromTap(text)
-            }
-        case .copy, .cut:
-            if let text = model.selectedFilterTextForTap(cut: command == .cut) {
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
-            }
-        case .selectAll, .undo, .redo:
-            break
-        }
-    }
-
-    private func attemptSearchFieldFocus(generation: Int, attempt: Int) {
-        guard generation == searchFocusGeneration,
-              wantsSearchFieldFocus, isVisible, model.visible,
-              model.stickySession, SwitchPreferences.shared.typeToFilter else { return }
-        contentView?.layoutSubtreeIfNeeded()
-        if let field = model.registeredSearchField, field.window === self {
-            _ = makeFirstResponder(field)
-            if let editor = field.currentEditor() as? NSTextView {
-                // A different picker identity can reuse the same first responder
-                // after resetting its query. Synchronize before publishing focus
-                // back to the event tap, otherwise the first raw key can revive
-                // the previous session's text.
-                let alreadySynchronized = model.searchFieldFocused
-                    && editor.string == model.filterText
-                if !alreadySynchronized {
-                    field.stringValue = model.filterText
-                    editor.string = model.filterText
-                }
-                let shouldSelectAll = wantsSearchSelectAll
-                    && model.hasPendingFilterSelectAll
-                wantsSearchSelectAll = false
-                if shouldSelectAll {
-                    editor.selectAll(nil)
-                } else if !alreadySynchronized {
-                    editor.setSelectedRange(NSRange(
-                        location: (model.filterText as NSString).length,
-                        length: 0
-                    ))
-                }
-                model.setSearchFieldFocused(true, for: field)
-                return
-            }
-        }
-        if attempt < 5 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
-                self?.attemptSearchFieldFocus(generation: generation, attempt: attempt + 1)
-            }
-        }
     }
 }
 

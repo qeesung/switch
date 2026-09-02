@@ -37,6 +37,21 @@ final class PickerKeyInterpreterTests: XCTestCase {
         )
     }
 
+    func testLegacyFilterAcceptsOnlyItsSupportedASCIICharacters() {
+        for character: Character in ["A", "z", " ", "-", "."] {
+            XCTAssertTrue(PickerKeyInterpreter.isAllowedFilterCharacter(character))
+        }
+        for character: Character in ["1", "_", "/", "飞", "é", "🙂"] {
+            XCTAssertFalse(PickerKeyInterpreter.isAllowedFilterCharacter(character))
+        }
+    }
+
+    func testNonASCIICharactersCannotBecomeFilterInput() {
+        XCTAssertNil(action("飞", keyCode: 3, typeToFilter: true))
+        XCTAssertNil(action("é", keyCode: 14, typeToFilter: true))
+        XCTAssertNil(action("🙂", keyCode: 0, typeToFilter: true))
+    }
+
     private func action(
         _ character: Character?,
         keyCode: CGKeyCode,

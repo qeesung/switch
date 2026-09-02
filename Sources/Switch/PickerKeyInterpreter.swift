@@ -14,6 +14,19 @@ enum PickerKeyInterpreter {
     private static let keypadDigits: [CGKeyCode] = [83, 84, 85, 86, 87, 88, 89, 91, 92]
     private static let asciiDigits = Array("123456789")
 
+    /// The legacy type-to-filter path deliberately accepts only the printable
+    /// ASCII characters that participate in window search. Digits remain picker
+    /// shortcuts, while punctuation other than space, hyphen, and period is ignored.
+    static func isAllowedFilterCharacter(_ character: Character) -> Bool {
+        let scalars = character.unicodeScalars
+        guard scalars.count == 1, let value = scalars.first?.value else { return false }
+        return (65...90).contains(value)
+            || (97...122).contains(value)
+            || value == 32
+            || value == 45
+            || value == 46
+    }
+
     /// Interprets printable picker commands from the character produced by the active
     /// keyboard layout. `keyCode` is only used for the layout-independent number pad.
     static func action(
@@ -45,8 +58,9 @@ enum PickerKeyInterpreter {
             return .pickIndex(index)
         }
 
-        if typeToFilter, let character,
-           character.isLetter || character == " " || character == "-" || character == "." {
+        if typeToFilter, let logicalCharacter,
+           isAllowedFilterCharacter(logicalCharacter),
+           let character = String(logicalCharacter).lowercased().first {
             return .appendFilter(character)
         }
         return nil

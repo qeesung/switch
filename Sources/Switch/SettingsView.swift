@@ -281,7 +281,7 @@ struct SettingsView: View {
                 section("Sizing") {
                     VStack(spacing: 0) {
                         row(title: "Picker size",
-                            detail: "Scale the picker, text, search field, previews, icons, and spacing together.") {
+                            detail: "Scale the picker, text, previews, icons, and spacing together.") {
                             Picker(selection: $prefs.pickerSize) {
                                 ForEach(PickerSizeChoice.allCases) { size in
                                     Text(size.label).tag(size)
