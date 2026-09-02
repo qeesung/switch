@@ -116,6 +116,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source_commit="$(git rev-parse --short HEAD^)"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          /usr/libexec/PlistBuddy -c "Delete :BuildCommit" Sources/Switch/Resources/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :BuildCommit string $source_commit" Sources/Switch/Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Delete :BuildDate" Sources/Switch/Resources/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :BuildDate string $build_date" Sources/Switch/Resources/Info.plist
           xcodebuild \
             -project Switch.xcodeproj \
             -scheme Switch \
@@ -147,6 +153,8 @@ jobs:
           done
           ditto -c -k --sequesterRsrc --keepParent \
             "$debug_app" "${{ runner.temp }}/Switch-unsigned-Debug.zip"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$release_app" "${{ runner.temp }}/Switch-unsigned-Release.zip"
 
       - name: Upload unsigned app
         uses: actions/upload-artifact@v4
@@ -155,3 +163,11 @@ jobs:
           path: ${{ runner.temp }}/Switch-unsigned-Debug.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload unsigned Release app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switch-unsigned-Release
+          path: ${{ runner.temp }}/Switch-unsigned-Release.zip
+          if-no-files-found: error
+          retention-days: 1
